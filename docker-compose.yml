@@ -25,6 +25,6 @@ services:
       # Working directory -- the agent's workspace root (your project files).
       - ./workspace:/workspace
       # dsh home -- profiles/plugins, credentials, config, sessions, storage.
-      - ./dsh-home:/home/dsh/.dsh
+      - ./dsh-home:/root/.dsh
     # For LAN/remote access, add your host to the browser-trust fence:
     # command: ["--trusted-host", "192.168.1.10"]

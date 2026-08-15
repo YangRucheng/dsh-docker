@@ -22,7 +22,7 @@ services:
       DEEPSEEK_API_KEY: "sk-..."
     volumes:
       - ./workspace:/workspace      # 工作目录
-      - ./dsh-home:/home/dsh/.dsh   # 插件 / 配置 / 凭证 / 存储
+      - ./dsh-home:/root/.dsh   # 插件 / 配置 / 凭证 / 存储
 ```
 
 ```bash
@@ -38,7 +38,7 @@ docker run -d --name dsh \
   -p 3080:3080 \
   -e DEEPSEEK_API_KEY=sk-... \
   -v "$PWD/workspace:/workspace" \
-  -v "$PWD/dsh-home:/home/dsh/.dsh" \
+  -v "$PWD/dsh-home:/root/.dsh" \
   sgccr.ccs.tencentyun.com/misaka-network/deepseek-harness:latest
 ```
 
