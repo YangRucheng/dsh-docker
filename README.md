@@ -51,14 +51,18 @@ docker run -d --name dsh \
 | `DSH_RETRY` | 请求失败重试次数 | `30` |
 | `UA` | 覆盖请求模型供应商的 User-Agent | `deepseek-harness/<版本> (+url)` |
 | `DSH_HOST` | `0.0.0.0` 或 `127.0.0.1`（仅本机） | `0.0.0.0` |
+| `DSH_TRUSTED_HOSTS` | 信任的访问域名（空格/逗号分隔），供反向代理 / 域名访问 | 无 |
 
-### 跨机器访问
+### 跨机器 / 域名访问
 
-dsh 的 `/api` 信任栅栏默认只放行 `localhost` / `127.x`，从其他机器访问需追加 `--trusted-host`：
+dsh 的 `/api` 信任栅栏默认只放行 `localhost` / `127.x`。通过域名或反向代理访问时，需把访问域名加入信任，否则 `/api` 会返回 403：
 
 ```yaml
-command: ["--trusted-host", "192.168.1.10"]
+environment:
+  DSH_TRUSTED_HOSTS: "dsh.example.com"
 ```
+
+多个用空格或逗号分隔；也可追加 `--trusted-host <host>`（或 `command: ["--trusted-host", "host"]`）。
 
 > ⚠️ 监听 `0.0.0.0` 会把能执行代码的 agent 暴露到网络，且 dsh 无鉴权层。公网部署请加反向代理 / VPN，或设 `DSH_HOST=127.0.0.1` 仅本机访问。
 

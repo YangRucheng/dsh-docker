@@ -13,6 +13,16 @@ esac
 PORT_ARGS=""
 [ -n "${DSH_PORT:-}" ] && PORT_ARGS="--port $DSH_PORT"
 
+# Optional trusted hosts (space/comma separated) -> repeatable --trusted-host flags.
+# Needed when accessing through a domain/reverse proxy: dsh's /api trust fence
+# only lets through loopback plus the trusted authorities, otherwise it 403s.
+TRUSTED_ARGS=""
+if [ -n "${DSH_TRUSTED_HOSTS:-}" ]; then
+  for th in $(printf '%s' "$DSH_TRUSTED_HOSTS" | tr ',' ' '); do
+    TRUSTED_ARGS="$TRUSTED_ARGS --trusted-host $th"
+  done
+fi
+
 if [ "$(id -u)" = "0" ]; then
   # Running as root (the image default): fix bind-mount ownership, then drop to
   # the non-root `dsh` user. Bind mounts keep the host's ownership, which would
@@ -22,9 +32,9 @@ if [ "$(id -u)" = "0" ]; then
   chown -R dsh:dsh "$DSH_HOME" 2>/dev/null || true
   [ -d /workspace ] && chown dsh:dsh /workspace 2>/dev/null || true
   # shellcheck disable=SC2086
-  exec gosu dsh dsh web $PATCH_ARGS $PORT_ARGS "$@"
+  exec gosu dsh dsh web $PATCH_ARGS $PORT_ARGS $TRUSTED_ARGS "$@"
 fi
 
 # Already running as a non-root user (e.g. `docker run --user ...`): run directly.
 # shellcheck disable=SC2086
-exec dsh web $PATCH_ARGS $PORT_ARGS "$@"
+exec dsh web $PATCH_ARGS $PORT_ARGS $TRUSTED_ARGS "$@"
