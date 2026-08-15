@@ -9,14 +9,20 @@
 // The patch bakes in the `process.env.*` READS (not literal values), so the
 // values are resolved at RUNTIME: changing the env var and restarting the
 // container works without rebuilding the image.
-//
-// Run with NODE_PATH pointing at the global node_modules so require.resolve
-// finds the hoisted package, e.g.:
-//   NODE_PATH="$(npm root -g)" node /tmp/patch-dsh.cjs
 
 const fs = require('node:fs')
+const path = require('node:path')
+const { createRequire } = require('node:module')
+const { execSync, spawnSync } = require('node:child_process')
 
-const entry = require.resolve('@deepseek-ai/dsh-llm')
+// Resolve @deepseek-ai/dsh-llm robustly: anchor resolution inside the installed
+// @deepseek-ai/dsh package so the package is found whether npm hoisted it to the
+// top-level node_modules or nested it under dsh/node_modules (npm nests some
+// native deps like node-pty).
+const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim()
+const dshDir = path.join(globalRoot, '@deepseek-ai', 'dsh')
+const req = createRequire(path.join(dshDir, 'package.json'))
+const entry = req.resolve('@deepseek-ai/dsh-llm')
 
 const replacements = [
   // Failure retry count (was a hardcoded 2).
@@ -43,4 +49,9 @@ for (const [from, to] of replacements) {
   src = src.replace(from, to)
 }
 fs.writeFileSync(entry, src)
+
+// The patched file must still parse.
+const check = spawnSync(process.execPath, ['--check', entry], { stdio: 'inherit' })
+if (check.status !== 0) process.exit(check.status ?? 1)
+
 console.log(`patch-dsh: patched ${entry}`)

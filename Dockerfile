@@ -1,7 +1,14 @@
 # syntax=docker/dockerfile:1
 
 ARG NODE_VERSION=22
-FROM node:${NODE_VERSION}-bookworm-slim
+
+# ---- build stage: install dsh (compiles native deps such as node-pty) ----
+FROM node:${NODE_VERSION}-bookworm-slim AS build
+
+# node-gyp needs a C/C++ toolchain + Python to build native modules (node-pty).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # dsh version to install (build-arg; defaults to npm `latest`).
 ARG DSH_VERSION=latest
@@ -13,10 +20,16 @@ RUN npm install -g "pnpm" "@deepseek-ai/dsh@${DSH_VERSION}" \
     && dsh --version
 
 # Patch the compiled LLM core: DSH_RETRY (retry count) and UA (User-Agent) overrides.
-# Done at build time as root (node_modules is root-owned); the env vars are read at runtime.
 COPY patch-dsh.cjs /tmp/patch-dsh.cjs
-RUN NODE_PATH="$(npm root -g)" node /tmp/patch-dsh.cjs \
+RUN node /tmp/patch-dsh.cjs \
     && rm /tmp/patch-dsh.cjs
+
+# ---- runtime stage: slim, no toolchain ----
+FROM node:${NODE_VERSION}-bookworm-slim
+
+# Copy the global install (dsh + pnpm + compiled native modules) and the bins.
+COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=build /usr/local/bin /usr/local/bin
 
 # Non-root user + mount points.
 RUN groupadd --gid 10001 dsh \
