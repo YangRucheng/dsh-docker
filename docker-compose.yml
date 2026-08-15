@@ -1,0 +1,24 @@
+services:
+  dsh:
+    image: sgccr.ccs.tencentyun.com/misaka-network/deepseek-harness:latest
+    container_name: dsh
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    environment:
+      DSH_PORT: "3080"
+      # DeepSeek API key (or put it in ./dsh-home/.env)
+      # DEEPSEEK_API_KEY: "sk-..."
+      # Set to 127.0.0.1 to disable all-interfaces binding (safe mode)
+      # DSH_HOST: "127.0.0.1"
+      # Model-request failure retry count (default 30)
+      # DSH_RETRY: "30"
+      # Override the User-Agent sent to the model provider
+      # UA: "my-custom-agent/1.0"
+    volumes:
+      # Working directory -- the agent's workspace root (your project files).
+      - ./workspace:/workspace
+      # dsh home -- profiles/plugins, credentials, config, sessions, storage.
+      - ./dsh-home:/home/dsh/.dsh
+    # For LAN/remote access, add your host to the browser-trust fence:
+    # command: ["--trusted-host", "192.168.1.10"]
