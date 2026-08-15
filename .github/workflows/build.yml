@@ -1,0 +1,115 @@
+name: check-and-build
+
+on:
+  schedule:
+    # Daily at 02:00 UTC -- check npm for a new dsh version.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'dsh version to build (blank = npm latest)'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'VERSION'
+      - '**.md'
+      - '.github/**'
+
+permissions:
+  contents: write # to commit the updated VERSION file
+
+env:
+  REGISTRY: sgccr.ccs.tencentyun.com
+  IMAGE: misaka-network/deepseek-harness
+
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve dsh version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TARGET="${{ github.event.inputs.version }}"
+          else
+            TARGET="$(npm view @deepseek-ai/dsh version)"
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Resolved dsh version: $TARGET"
+
+      - name: Decide whether to build
+        id: check
+        run: |
+          TARGET="${{ steps.version.outputs.target }}"
+          CURRENT="$(cat VERSION 2>/dev/null || true)"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$TARGET" = "$CURRENT" ]; then
+            echo "Up to date at $CURRENT -- nothing to build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Building $TARGET (current: ${CURRENT:-none})."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Tencent Cloud CCR
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TENCENT_CCR_USERNAME }}
+          password: ${{ secrets.TENCENT_CCR_PASSWORD }}
+
+      - name: Build and push
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            DSH_VERSION=${{ steps.version.outputs.target }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.target }}
+          labels: |
+            org.opencontainers.image.title=deepseek-harness
+            org.opencontainers.image.version=${{ steps.version.outputs.target }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Record built version
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          TARGET="${{ steps.version.outputs.target }}"
+          CURRENT="$(cat VERSION 2>/dev/null || true)"
+          if [ "$TARGET" != "$CURRENT" ]; then
+            printf '%s\n' "$TARGET" > VERSION
+            git config user.name  'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git add VERSION
+            git commit -m "build: bump dsh to $TARGET" || echo "nothing to commit"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          else
+            echo "VERSION already at $TARGET -- nothing to commit."
+          fi
