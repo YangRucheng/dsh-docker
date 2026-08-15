@@ -27,6 +27,12 @@ RUN node /tmp/patch-dsh.cjs \
 # ---- runtime stage: slim, no toolchain ----
 FROM node:${NODE_VERSION}-bookworm-slim
 
+# gosu lets the entrypoint (running as root) fix bind-mount ownership, then drop
+# privileges to the non-root `dsh` user.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the global install (dsh + pnpm + compiled native modules) and the bins.
 COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=build /usr/local/bin /usr/local/bin
@@ -45,7 +51,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV DSH_HOME=/home/dsh/.dsh \
     NODE_ENV=production
 
-USER dsh
+# Runs as root so the entrypoint can fix mount ownership, then drops to `dsh`.
 WORKDIR /workspace
 EXPOSE 3080
 

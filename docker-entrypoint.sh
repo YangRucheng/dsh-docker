@@ -1,8 +1,7 @@
 #!/bin/sh
 set -e
 
-# Bind host: default 0.0.0.0 so Docker `-p 3080:3080` reaches the server.
-# Set DSH_HOST=127.0.0.1 to revert to the loopback-only (safe) default.
+# Bind host (0.0.0.0 by default; DSH_HOST=127.0.0.1 reverts to loopback).
 HOST="${DSH_HOST:-0.0.0.0}"
 case "$HOST" in
   0.0.0.0)   PATCH_ARGS="--patch /etc/dsh/bind-0.0.0.0.patch.yml" ;;
@@ -12,10 +11,20 @@ esac
 
 # Optional port env -> the web app's own --port flag.
 PORT_ARGS=""
-if [ -n "${DSH_PORT:-}" ]; then
-  PORT_ARGS="--port $DSH_PORT"
+[ -n "${DSH_PORT:-}" ] && PORT_ARGS="--port $DSH_PORT"
+
+if [ "$(id -u)" = "0" ]; then
+  # Running as root (the image default): fix bind-mount ownership, then drop to
+  # the non-root `dsh` user. Bind mounts keep the host's ownership, which would
+  # otherwise block `dsh` from writing its data dir ($DSH_HOME) and the workspace.
+  DSH_HOME="${DSH_HOME:-/home/dsh/.dsh}"
+  mkdir -p "$DSH_HOME"
+  chown -R dsh:dsh "$DSH_HOME" 2>/dev/null || true
+  [ -d /workspace ] && chown dsh:dsh /workspace 2>/dev/null || true
+  # shellcheck disable=SC2086
+  exec gosu dsh dsh web $PATCH_ARGS $PORT_ARGS "$@"
 fi
 
-# Extra user args (e.g. --trusted-host) are appended verbatim.
+# Already running as a non-root user (e.g. `docker run --user ...`): run directly.
 # shellcheck disable=SC2086
 exec dsh web $PATCH_ARGS $PORT_ARGS "$@"

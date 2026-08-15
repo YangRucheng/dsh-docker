@@ -80,6 +80,8 @@ docker run -d --name dsh \
 | `/workspace` | 工作目录（agent 的 workspace root，放你的项目文件） |
 | `/home/dsh/.dsh` | `DSH_HOME`：插件（`profiles/`）、凭证（`.credentials.yaml` / `.env`）、会话、存储 |
 
+> 入口脚本以 root 启动，会自动把 `/home/dsh/.dsh`（递归）和 `/workspace`（顶层）的属主修正为容器内的 `dsh` 用户，再用 `gosu` 降权运行。因此**绑定挂载的宿主机目录即使属主是 root 也能正常写入**，无需手动 `chown`。
+
 ## 配置
 
 ### API Key
