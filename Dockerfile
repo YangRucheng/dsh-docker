@@ -38,7 +38,6 @@ RUN apt-get update \
         curl ca-certificates wget \
         openssh-client \
         ripgrep jq unzip procps \
-        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the global install (dsh + pnpm + compiled native modules) and the bins.
@@ -46,21 +45,15 @@ RUN apt-get update \
 COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=build /usr/local/bin /usr/local/bin
 
-# Non-root user + mount points.
-RUN groupadd --gid 10001 dsh \
-    && useradd --uid 10001 --gid dsh --create-home --home-dir /home/dsh dsh \
-    && mkdir -p /workspace /home/dsh/.dsh \
-    && chown -R dsh:dsh /workspace /home/dsh
-
 # Patch overlay (binds the Web server to 0.0.0.0) + entrypoint.
 COPY config/bind-0.0.0.0.patch.yml /etc/dsh/bind-0.0.0.0.patch.yml
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-ENV DSH_HOME=/home/dsh/.dsh \
+ENV DSH_HOME=/root/.dsh \
     NODE_ENV=production
 
-# Runs as root so the entrypoint can fix mount ownership, then drops to `dsh`.
+# Runs as root.
 WORKDIR /workspace
 EXPOSE 3080
 
