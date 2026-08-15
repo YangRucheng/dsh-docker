@@ -29,7 +29,7 @@ FROM node:${NODE_VERSION}-bookworm-slim
 
 # Common development tools, in ONE early layer BEFORE the dsh COPY below, so it
 # stays cached across dsh updates (only the dsh layers change, keeping pulls small).
-# `node`/`npm` already come from the base image.
+# `node`/`npm` already come from the base image. `gh` comes from its official repo.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -38,6 +38,12 @@ RUN apt-get update \
         curl ca-certificates wget \
         openssh-client \
         ripgrep jq unzip procps \
+    && mkdir -p -m 755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the global install (dsh + pnpm + compiled native modules) and the bins.
