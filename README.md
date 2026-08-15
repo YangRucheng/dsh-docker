@@ -52,6 +52,7 @@ docker run -d --name dsh \
 | `UA` | 覆盖请求模型供应商的 User-Agent | `deepseek-harness/<版本> (+url)` |
 | `DSH_HOST` | `0.0.0.0` 或 `127.0.0.1`（仅本机） | `0.0.0.0` |
 | `DSH_TRUSTED_HOSTS` | 信任的访问域名（空格/逗号分隔），供反向代理 / 域名访问 | 无 |
+| `DSH_DISABLE_TRUST_FENCE` | 设为 `1` 关闭 `/api` 信任栅栏（无鉴权，仅在你自己的反代 / 鉴权后使用） | 无 |
 
 ### 跨机器 / 域名访问
 
@@ -63,6 +64,8 @@ environment:
 ```
 
 多个用空格或逗号分隔；也可追加 `--trusted-host <host>`（或 `command: ["--trusted-host", "host"]`）。
+
+> 若不想维护信任域名列表，可设 `DSH_DISABLE_TRUST_FENCE=1` 完全关闭这层防护。⚠️ 关闭后任何能访问该端口的人都能调用 `/api`（含执行代码），务必确保外层有自己的鉴权。
 
 > ⚠️ 监听 `0.0.0.0` 会把能执行代码的 agent 暴露到网络，且 dsh 无鉴权层。公网部署请加反向代理 / VPN，或设 `DSH_HOST=127.0.0.1` 仅本机访问。
 

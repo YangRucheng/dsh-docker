@@ -13,6 +13,8 @@ services:
       # DSH_HOST: "127.0.0.1"
       # Trust a domain/reverse-proxy host so /api doesn't 403 (space/comma separated)
       # DSH_TRUSTED_HOSTS: "dsh.example.com"
+      # Disable the /api trust fence entirely (no auth! only behind your own auth)
+      # DSH_DISABLE_TRUST_FENCE: "1"
       # Model-request failure retry count (default 30)
       # DSH_RETRY: "30"
       # Override the User-Agent sent to the model provider
