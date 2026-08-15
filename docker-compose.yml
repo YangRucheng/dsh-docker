@@ -7,6 +7,8 @@ services:
       - "3080:3080"
     environment:
       DSH_PORT: "3080"
+      # Default working directory shown in the directory picker (defaults to /workspace)
+      # DSH_DEFAULT_DIRECTORY: "/workspace"
       # DeepSeek API key (or put it in ./dsh-home/.env)
       # DEEPSEEK_API_KEY: "sk-..."
       # Set to 127.0.0.1 to disable all-interfaces binding (safe mode)

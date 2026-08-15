@@ -48,6 +48,7 @@ docker run -d --name dsh \
 |---|---|---|
 | `DEEPSEEK_API_KEY` | DeepSeek API Key（必填，也可写进 `./dsh-home/.env`） | 无 |
 | `DSH_PORT` | 监听端口 | `3080` |
+| `DSH_DEFAULT_DIRECTORY` | 默认工作目录 | `/workspace`（容器当前目录） |
 | `DSH_RETRY` | 请求失败重试次数 | `30` |
 | `UA` | 覆盖请求模型供应商的 User-Agent | `deepseek-harness/<版本> (+url)` |
 | `DSH_HOST` | `0.0.0.0` 或 `127.0.0.1`（仅本机） | `0.0.0.0` |

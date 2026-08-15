@@ -46,6 +46,17 @@ const targets = [
       ],
     ],
   },
+  {
+    pkg: '@deepseek-ai/dsh-host-directory-picker-browse',
+    replacements: [
+      // Default directory: follow the container cwd (/workspace via WORKDIR)
+      // instead of $HOME (which gosu points at /home/dsh). Overridable via env.
+      [
+        'const home = homedir()',
+        'const home = process.env.DSH_DEFAULT_DIRECTORY ?? process.cwd()',
+      ],
+    ],
+  },
 ]
 
 for (const { pkg, replacements } of targets) {
