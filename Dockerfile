@@ -5,7 +5,7 @@ ARG NODE_VERSION=22
 # ---- build stage: install dsh (compiles native deps such as node-pty) ----
 FROM node:${NODE_VERSION}-bookworm-slim AS build
 
-# node-gyp needs a C/C++ toolchain + Python to build native modules (node-pty).
+# node-gyp toolchain (build stage only; not part of the final image).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -19,21 +19,30 @@ RUN npm install -g "pnpm" "@deepseek-ai/dsh@${DSH_VERSION}" \
     && npm cache clean --force \
     && dsh --version
 
-# Patch the compiled LLM core: DSH_RETRY (retry count) and UA (User-Agent) overrides.
+# Patch the compiled LLM core + trust fence + default directory (env-driven).
 COPY patch-dsh.cjs /tmp/patch-dsh.cjs
 RUN node /tmp/patch-dsh.cjs \
     && rm /tmp/patch-dsh.cjs
 
-# ---- runtime stage: slim, no toolchain ----
+# ---- runtime stage ----
 FROM node:${NODE_VERSION}-bookworm-slim
 
-# gosu lets the entrypoint (running as root) fix bind-mount ownership, then drop
-# privileges to the non-root `dsh` user.
+# Common development tools, in ONE early layer BEFORE the dsh COPY below, so it
+# stays cached across dsh updates (only the dsh layers change, keeping pulls small).
+# `node`/`npm` already come from the base image.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gosu \
+    && apt-get install -y --no-install-recommends \
+        git \
+        build-essential \
+        python3 python3-pip python3-venv python3-dev \
+        curl ca-certificates wget \
+        openssh-client \
+        ripgrep jq unzip procps \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the global install (dsh + pnpm + compiled native modules) and the bins.
+# These layers change on every dsh version update.
 COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=build /usr/local/bin /usr/local/bin
 
