@@ -54,6 +54,8 @@ COPY --from=build /usr/local/bin /usr/local/bin
 # Patch overlay (binds the Web server to 0.0.0.0) + entrypoint.
 COPY config/bind-0.0.0.0.patch.yml /etc/dsh/bind-0.0.0.0.patch.yml
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Runtime plugin-fence patch (runs at container start when DSH_DISABLE_TRUST_FENCE=1).
+COPY patch-plugin-fence.cjs /usr/local/bin/patch-plugin-fence.cjs
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV DSH_HOME=/root/.dsh \

@@ -13,9 +13,12 @@ services:
       # DEEPSEEK_API_KEY: "sk-..."
       # Set to 127.0.0.1 to disable all-interfaces binding (safe mode)
       # DSH_HOST: "127.0.0.1"
-      # Trust a domain/reverse-proxy host so /api doesn't 403 (space/comma separated)
-      # DSH_TRUSTED_HOSTS: "dsh.example.com"
-      # Disable the /api trust fence entirely (no auth! only behind your own auth)
+      # Trust an access host (LAN IP / domain / reverse-proxy) so /api and
+      # plugin routes (/sidebar/*) don't 403 when accessed remotely
+      # (space/comma separated; your own LAN IP is auto-trusted).
+      # DSH_TRUSTED_HOSTS: "192.168.1.10 dsh.example.com"
+      # Disable the trust fence entirely (core /api AND installed plugin
+      # routes). No auth layer! Only use behind your own auth/VPN.
       # DSH_DISABLE_TRUST_FENCE: "1"
       # Model-request failure retry count (default 30)
       # DSH_RETRY: "30"
@@ -26,5 +29,8 @@ services:
       - ./workspace:/workspace
       # dsh home -- profiles/plugins, credentials, config, sessions, storage.
       - ./dsh-home:/root/.dsh
-    # For LAN/remote access, add your host to the browser-trust fence:
+    # For LAN/remote access via a host IP or domain not auto-trusted, either:
+    #   - add it to DSH_TRUSTED_HOSTS above, or
+    #   - for fully open home-LAN use (no auth layer!) set DSH_DISABLE_TRUST_FENCE=1;
+    #     that now also opens plugin routes (/sidebar/*), not just /api.
     # command: ["--trusted-host", "192.168.1.10"]
