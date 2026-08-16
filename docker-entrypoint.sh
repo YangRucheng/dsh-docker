@@ -21,5 +21,12 @@ if [ -n "${DSH_TRUSTED_HOSTS:-}" ]; then
   done
 fi
 
+# When the /api trust fence is disabled, apply the same furlough to the
+# fences third-party plugins carry inside their own compiled code (e.g.
+# dsh-better-sidebar's /sidebar routes) — see patch-plugin-fence.cjs.
+if [ "${DSH_DISABLE_TRUST_FENCE:-}" = "1" ]; then
+  node /usr/local/bin/patch-plugin-fence.cjs
+fi
+
 # shellcheck disable=SC2086
 exec dsh web $PATCH_ARGS $PORT_ARGS $TRUSTED_ARGS "$@"
