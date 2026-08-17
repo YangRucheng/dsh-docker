@@ -29,11 +29,10 @@ FROM node:${NODE_VERSION}-bookworm-slim
 
 # Common development tools, in ONE early layer BEFORE the dsh COPY below, so it
 # stays cached across dsh updates (only the dsh layers change, keeping pulls small).
-# `node`/`npm` already come from the base image. `gh` is a pinned dependency
-# (ARG GH_VERSION) installed below from its official GitHub releases, with
-# tarball checksum verification, so rebuilds are reproducible and a bad pin or
-# a corrupted download fails the build loudly.
-ARG GH_VERSION=2.97.0
+# `node`/`npm` already come from the base image. `gh` is always the latest
+# release from its official GitHub releases (resolved at build time via the
+# `releases/latest` redirect), with tarball checksum verification, so a
+# corrupted download or a failed version lookup fails the build loudly.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -44,6 +43,8 @@ RUN apt-get update \
         ripgrep jq unzip procps \
     && cd /tmp \
     && ARCH="$(dpkg --print-architecture)" \
+    && GH_VERSION="$(curl -fsSIL -L -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest | sed -E 's|.*/tag/v([0-9.]+)/?.*|\1|')" \
+    && echo "Resolved gh CLI version: $GH_VERSION" \
     && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" -o gh_checksums.txt \
     && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
     && grep "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" gh_checksums.txt | sha256sum -c - \
