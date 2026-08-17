@@ -29,7 +29,11 @@ FROM node:${NODE_VERSION}-bookworm-slim
 
 # Common development tools, in ONE early layer BEFORE the dsh COPY below, so it
 # stays cached across dsh updates (only the dsh layers change, keeping pulls small).
-# `node`/`npm` already come from the base image. `gh` comes from its official repo.
+# `node`/`npm` already come from the base image. `gh` is a pinned dependency
+# (ARG GH_VERSION) installed below from its official GitHub releases, with
+# tarball checksum verification, so rebuilds are reproducible and a bad pin or
+# a corrupted download fails the build loudly.
+ARG GH_VERSION=2.97.0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
@@ -38,12 +42,16 @@ RUN apt-get update \
         curl ca-certificates wget \
         openssh-client \
         ripgrep jq unzip procps \
-    && mkdir -p -m 755 /etc/apt/keyrings \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends gh \
+    && cd /tmp \
+    && ARCH="$(dpkg --print-architecture)" \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" -o gh_checksums.txt \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+    && grep "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" gh_checksums.txt | sha256sum -c - \
+    && tar -xzf "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+    && cp "gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh \
+    && chmod +x /usr/local/bin/gh \
+    && rm -rf "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" "gh_${GH_VERSION}_linux_${ARCH}" gh_checksums.txt \
+    && gh --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the global install (dsh + pnpm + compiled native modules) and the bins.
