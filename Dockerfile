@@ -43,10 +43,13 @@ RUN apt-get update \
         ripgrep jq unzip procps \
     && cd /tmp \
     && ARCH="$(dpkg --print-architecture)" \
-    && GH_VERSION="$(curl -fsSIL -L -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest | sed -E 's|.*/tag/v([0-9.]+)/?.*|\1|')" \
-    && echo "Resolved gh CLI version: $GH_VERSION" \
-    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" -o gh_checksums.txt \
-    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+    && GH_VERSION="$(curl -fsSIL -L --retry 5 --retry-all-errors -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest | sed -E 's|.*/tag/v([0-9.]+)/?.*|\1|')" \
+    && case "$GH_VERSION" in \
+         [0-9]*.[0-9]*.[0-9]*) echo "Resolved gh CLI version: $GH_VERSION" ;; \
+         *) echo "error: failed to resolve the latest gh release (got '$GH_VERSION')" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL --retry 5 --retry-all-errors "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt" -o gh_checksums.txt \
+    && curl -fsSL --retry 5 --retry-all-errors "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
     && grep "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" gh_checksums.txt | sha256sum -c - \
     && tar -xzf "gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
     && cp "gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh \
