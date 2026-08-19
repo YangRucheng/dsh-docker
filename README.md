@@ -66,7 +66,7 @@ docker build --build-arg DSH_REF=dsh-v0.1.0-rc.7 -t deepseek-harness:local .
 
 镜像内置了对 dsh 的思考等级（模型选择器里的「推理等级」）增强：任何模型都会暴露思考等级选项，不再要求模型供应商声明推理能力。
 
-- **手写声明（自定义 OpenAI 兼容网关等）或目录中未声明推理能力的模型**：显示通用等级梯子 `Off / Medium / High / Max`，选择后按原样发送给供应商（如 `reasoning_effort` 等 wire 参数）；不选择时保持发送行为不变（跟随供应商默认）。
+- **手写声明（自定义 OpenAI 兼容网关等）或目录中未声明推理能力的模型**：显示通用等级梯子 `Off / Medium / High / XHigh / Max`，**默认 High**（无 "Default" 选项），选择后按原样发送给供应商（如 `reasoning_effort` 等 wire 参数）。
 - **目录中已声明推理能力的模型**（如 DeepSeek 官方、OpenAI 等）：仍只显示其真实支持的等级，行为不变。
 - **已明确标注不支持推理的目录模型**：不显示思考等级选项（避免把不支持的参数发给模型）。
 

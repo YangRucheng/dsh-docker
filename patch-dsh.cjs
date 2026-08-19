@@ -76,27 +76,30 @@ const targets = [
       ],
       // Universal reasoning ladder: any model whose adapter declares NO
       // reasoning capability still exposes a thinking-level ladder
-      // (off/medium/high/max), so the model picker's 推理等级 control is
-      // available for every model and every provider.
+      // (off/medium/high/xhigh/max, default high), so the model picker's
+      // 推理等级 control is available for every model and every provider.
       [
         'const DEFAULT_RETRYABLE_CODES = Object.freeze([',
         'const UNIVERSAL_REASONING_LEVELS = Object.freeze([\n' +
           '\tObject.freeze({ id: "off", name: "Off" }),\n' +
           '\tObject.freeze({ id: "medium", name: "Medium" }),\n' +
           '\tObject.freeze({ id: "high", name: "High" }),\n' +
+          '\tObject.freeze({ id: "xhigh", name: "XHigh" }),\n' +
           '\tObject.freeze({ id: "max", name: "Max" })\n' +
           ']);\n' +
           'const DEFAULT_RETRYABLE_CODES = Object.freeze([',
       ],
-      // Fill the reasoning metadata for models without any (universal ladder,
-      // no forced default: the picker offers "Default" + the four levels).
+      // Fill the reasoning metadata for models without any (universal ladder
+      // with a FORCED default of High -- the picker then offers no "Default"
+      // entry and every selection/request carries high unless changed).
       [
         'const reasoning = resolved.reasoning;\n\t\tif (reasoning === void 0) return info;',
         'const reasoning = resolved.reasoning;\n' +
           '\t\tif (reasoning === void 0) return {\n' +
           '\t\t\t...info,\n' +
           '\t\t\treasoning: {\n' +
-          '\t\t\t\tefforts: UNIVERSAL_REASONING_LEVELS.map((effort) => ({ ...effort }))\n' +
+          '\t\t\t\tefforts: UNIVERSAL_REASONING_LEVELS.map((effort) => ({ ...effort })),\n' +
+          '\t\t\t\tdefaultEffort: "high"\n' +
           '\t\t\t}\n' +
           '\t\t};',
       ],
@@ -139,7 +142,7 @@ const targets = [
           '\tlow: "Low",\n' +
           '\tmedium: "Medium",\n' +
           '\thigh: "High",\n' +
-          '\txhigh: "Extra High",\n' +
+          '\txhigh: "XHigh",\n' +
           '\tmax: "Max"\n' +
           '});',
       ],
@@ -147,13 +150,13 @@ const targets = [
       // providers, models without a catalog reasoning flag): instead of marking
       // them non-reasoning (`reasoning: false`, which hides the 推理等级 control
       // and suppresses every reasoning wire knob), give them a universal
-      // thinkingLevelMap restricted to the universal ladder (off/medium/high/max).
+      // thinkingLevelMap matching the universal ladder (off/medium/high/xhigh/max).
       // minimal/low are pinned to null (unsupported) because pi-ai reads an
-      // ABSENT key as supported for the five base levels; medium/high/max map to
-      // their own wire spelling, so a chosen level is sent as-is
+      // ABSENT key as supported for the five base levels; medium/high/xhigh/max
+      // map to their own wire spelling, so a chosen level is sent as-is
       // (`reasoning_effort` etc.) and the provider decides. "off" stays absent
-      // from the map so the no-selection default keeps sending nothing
-      // (provider default), exactly as before.
+      // from the map so no-level sends nothing. The `universal` marker lets
+      // reasoningInfo force the High default (no "Default" entry in the picker).
       [
         'if (efforts === void 0) return { reasoning: base?.reasoning ?? false };',
         'if (efforts === void 0) {\n' +
@@ -166,15 +169,25 @@ const targets = [
           '\t\t\t\tlow: null,\n' +
           '\t\t\t\tmedium: "medium",\n' +
           '\t\t\t\thigh: "high",\n' +
+          '\t\t\t\txhigh: "xhigh",\n' +
           '\t\t\t\tmax: "max"\n' +
-          '\t\t\t}\n' +
+          '\t\t\t},\n' +
+          '\t\t\tuniversal: true\n' +
           '\t\t};\n' +
           '\t}',
       ],
-      // Use the friendlier names in the picker metadata.
+      // Use the friendlier names in the picker metadata (must run BEFORE the
+      // reasoningInfo rewrite below, which matches the post-name-mapping text).
       [
         'name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`',
         'name: REASONING_LEVEL_NAMES[level] ?? `${level.charAt(0).toUpperCase()}${level.slice(1)}`',
+      ],
+      // Force the High default for universal models (a configured profile-level
+      // reasoning still wins); the "Default" option disappears once a default
+      // effort is present.
+      [
+        'if (!model.reasoning) return {};\n\treturn { reasoning: {\n\t\tefforts: getSupportedThinkingLevels(model).map((level) => ({\n\t\t\tid: ReasoningEffortId(level),\n\t\t\tname: REASONING_LEVEL_NAMES[level] ?? `${level.charAt(0).toUpperCase()}${level.slice(1)}`\n\t\t})),\n\t\t...defaultLevel === void 0 ? {} : { defaultEffort: ReasoningEffortId(defaultLevel) }\n\t} };',
+        'if (!model.reasoning) return {};\n\tconst effectiveDefault = defaultLevel ?? (model.universal === true ? "high" : void 0);\n\treturn { reasoning: {\n\t\tefforts: getSupportedThinkingLevels(model).map((level) => ({\n\t\t\tid: ReasoningEffortId(level),\n\t\t\tname: REASONING_LEVEL_NAMES[level] ?? `${level.charAt(0).toUpperCase()}${level.slice(1)}`\n\t\t})),\n\t\t...effectiveDefault === void 0 ? {} : { defaultEffort: ReasoningEffortId(effectiveDefault) }\n\t} };',
       ],
     ],
   },
