@@ -65,13 +65,3 @@ docker run -d --name dsh \
 
 该增强通过 `patch-dsh.cjs` 在构建时注入 dsh 的 LLM 核心与 pi-ai 适配器，无需额外配置。
 
-### 远程访问报 403？
-
-DSH 有一个浏览器信任栅栏（防 DNS rebinding / 跨站）：凡是 `Host` 头既不是回环地址（`127.0.0.1`/`localhost`），也不是容器自身局域网 IP，又不在 `DSH_TRUSTED_HOSTS` 里，`/api` 一律返回 **403**。通过 Docker 端口映射从**宿主机局域网 IP 或域名**打开页面时最容易踩到（容器的 IP 跟你电脑的 IP 不是同一个）。
-
-已安装的第三方插件（如 `dsh-better-sidebar`）在自己的 `/sidebar/*` 路由上实现了同一套栅栏。镜像默认情况下容器自身的局域网 IP 已自动受信，所以：
-
-- **本机访问**（`http://localhost:3080`）不受影响；
-- **同局域网其它设备用 `http://<宿主机IP>:3080` 访问**、或**通过域名/反代访问**时：
-  - 方式一（推荐，保留栅栏）：把访问地址加进 `DSH_TRUSTED_HOSTS`，例如 `DSH_TRUSTED_HOSTS: "192.168.1.10 dsh.example.com"`；
-  - 方式二（完全放开，无鉴权）：设 `DSH_DISABLE_TRUST_FENCE=1`。镜像启动时会自动把该开关同步到已安装插件的内置栅栏（见 `patch-plugin-fence.cjs`），因此 `/api` 和插件的 `/sidebar/*` 路由都会放行，不会只修好一半、插件仍报 403。
