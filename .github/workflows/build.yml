@@ -2,12 +2,12 @@ name: 检查并构建
 
 on:
   schedule:
-    # Daily at 02:00 UTC -- check npm for a new dsh version.
+    # Daily at 02:00 UTC -- check upstream for a new dsh release tag.
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       version:
-        description: 'dsh version to build (blank = npm latest)'
+        description: 'dsh git ref 构建（如 dsh-v0.1.0-rc.7 / 分支 / commit，留空 = 最新发布标签）'
         required: false
         default: ''
   push:
@@ -38,23 +38,34 @@ jobs:
       - name: 设置 Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: 解析 dsh 版本
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            TARGET="${{ github.event.inputs.version }}"
+            RAW="${{ github.event.inputs.version }}"
+            case "$RAW" in
+              dsh-v*) REF="$RAW"; VER="${RAW#dsh-v}" ;;
+              [0-9]*.[0-9]*.*) REF="dsh-v${RAW}"; VER="$RAW" ;;
+              *) REF="$RAW"; VER="$RAW" ;;
+            esac
           else
-            TARGET="$(npm view @deepseek-ai/dsh version)"
+            REF="$(git ls-remote --tags https://github.com/deepseek-ai/deepseek-harness.git 'refs/tags/dsh-v*' | sed 's|.*refs/tags/||' | grep -v '\^{}' | sort -V | tail -1)"
+            VER="${REF#dsh-v}"
           fi
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Resolved dsh version: $TARGET"
+          if [ -z "$REF" ]; then
+            echo "error: no dsh release tag resolved" >&2
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Resolved dsh git ref: $REF (version $VER)"
 
       - name: 判断是否需要构建
         id: check
         run: |
-          TARGET="${{ steps.version.outputs.target }}"
+          TARGET="${{ steps.version.outputs.version }}"
           CURRENT="$(cat VERSION 2>/dev/null || true)"
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$TARGET" = "$CURRENT" ]; then
             echo "Up to date at $CURRENT -- nothing to build."
@@ -88,20 +99,20 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: |
-            DSH_VERSION=${{ steps.version.outputs.target }}
+            DSH_REF=${{ steps.version.outputs.ref }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.target }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.version.outputs.version }}
           labels: |
             org.opencontainers.image.title=deepseek-harness
-            org.opencontainers.image.version=${{ steps.version.outputs.target }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: 记录已构建版本
         if: steps.check.outputs.should_build == 'true'
         run: |
-          TARGET="${{ steps.version.outputs.target }}"
+          TARGET="${{ steps.version.outputs.version }}"
           CURRENT="$(cat VERSION 2>/dev/null || true)"
           if [ "$TARGET" != "$CURRENT" ]; then
             printf '%s\n' "$TARGET" > VERSION
