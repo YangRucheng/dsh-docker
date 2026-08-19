@@ -1,34 +1,56 @@
 # syntax=docker/dockerfile:1
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
+ARG DEBIAN_VARIANT=trixie
 
-# ---- build stage: install dsh (compiles native deps such as node-pty) ----
-FROM node:${NODE_VERSION}-bookworm-slim AS build
+# ---- build stage: build dsh from the deepseek-harness monorepo source ----
+FROM node:${NODE_VERSION}-${DEBIAN_VARIANT}-slim AS build
 
-# node-gyp toolchain (build stage only; not part of the final image).
+# node-gyp toolchain + git for the source clone (build stage only; not part of
+# the final image).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential python3 \
+    && apt-get install -y --no-install-recommends build-essential python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# dsh version to install (build-arg; defaults to npm `latest`).
-ARG DSH_VERSION=latest
+# dsh source to build: a git ref (release tag `dsh-v*`, branch, or commit) of
+# https://github.com/deepseek-ai/deepseek-harness. `latest` (default) resolves
+# the newest `dsh-v*` release tag at build time.
+ARG DSH_REF=latest
+RUN if [ "$DSH_REF" = "latest" ]; then \
+      REF="$(git ls-remote --tags https://github.com/deepseek-ai/deepseek-harness.git 'refs/tags/dsh-v*' | sed 's|.*refs/tags/||' | grep -v '\^{}' | sort -V | tail -1)"; \
+      echo "dsh: resolved latest release tag $REF"; \
+    else \
+      REF="$DSH_REF"; \
+    fi \
+    && test -n "$REF" \
+    && git init -q /src \
+    && git -C /src remote add origin https://github.com/deepseek-ai/deepseek-harness.git \
+    && git -C /src fetch -q --depth 1 origin "$REF" \
+    && git -C /src checkout -q FETCH_HEAD
 
-# pnpm is required at runtime by `dsh plugin` (plugin management forwards to pnpm).
-RUN npm install -g "pnpm" "@deepseek-ai/dsh@${DSH_VERSION}" \
-      --no-audit --no-fund \
-    && npm cache clean --force \
-    && dsh --version
+# pnpm (pinned to the repository's packageManager field, pnpm@11.7.0).
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 
-# Patch the compiled LLM core + trust fence + default directory (env-driven).
+WORKDIR /src
+
+# Install the full workspace (lifecycle scripts such as node-pty are already
+# reviewed by pnpm-workspace.yaml's allowBuilds) and compile every package
+# (tsc + tsdown, host & client faces) plus the Web shell (vite).
+RUN pnpm install --frozen-lockfile
+RUN pnpm run build:lib && pnpm run build:web
+
+# Patch the compiled LLM core + trust fence + default directory + universal
+# thinking levels (env-driven; see patch-dsh.cjs).
 COPY patch-dsh.cjs /tmp/patch-dsh.cjs
-RUN node /tmp/patch-dsh.cjs \
+RUN node /tmp/patch-dsh.cjs /src \
     && rm /tmp/patch-dsh.cjs
 
 # ---- runtime stage ----
-FROM node:${NODE_VERSION}-bookworm-slim
+FROM node:${NODE_VERSION}-${DEBIAN_VARIANT}-slim
 
 # Common development tools, in ONE early layer BEFORE the dsh COPY below, so it
-# stays cached across dsh updates (only the dsh layers change, keeping pulls small).
+# stays cached across dsh source updates (only the dsh layers change, keeping
+# pulls small).
 # `node`/`npm` already come from the base image. `gh` is always the latest
 # release from its official GitHub releases (resolved at build time via the
 # `releases/latest` redirect), with tarball checksum verification, so a
@@ -58,10 +80,17 @@ RUN apt-get update \
     && gh --version \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the global install (dsh + pnpm + compiled native modules) and the bins.
-# These layers change on every dsh version update.
-COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=build /usr/local/bin /usr/local/bin
+# Copy the built + patched source tree: the dsh CLI (apps/cli), every workspace
+# package (compiled lib bundles) and the built Web shell (apps/web/dist).
+# These layers change on every dsh source update.
+COPY --from=build /src /opt/dsh
+
+# `dsh` on PATH (symlink to the source-built CLI bin) and pnpm for `dsh plugin`
+# (plugin management forwards to pnpm).
+RUN ln -s /opt/dsh/apps/cli/lib/bin.js /usr/local/bin/dsh \
+    && npm install -g "pnpm@11.7.0" --no-audit --no-fund \
+    && npm cache clean --force \
+    && dsh --version
 
 # Patch overlay (binds the Web server to 0.0.0.0) + entrypoint.
 COPY config/bind-0.0.0.0.patch.yml /etc/dsh/bind-0.0.0.0.patch.yml

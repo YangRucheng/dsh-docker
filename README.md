@@ -1,6 +1,6 @@
 # deepseek-harness 镜像
 
-基于 npm 发行版 [`@deepseek-ai/dsh`](https://www.npmjs.com/package/@deepseek-ai/dsh) 打包的 DeepSeek Harness Docker 镜像，默认监听 `0.0.0.0`，配合 Docker 端口映射开箱即用。镜像由 GitHub Actions 定时检查 `dsh` 最新版本并自动构建推送到腾讯云 CCR。
+基于 [deepseek-harness 仓库源码](https://github.com/deepseek-ai/deepseek-harness)（`dsh-v*` 发布标签）在镜像内构建的 DeepSeek Harness Docker 镜像：pnpm workspace 安装依赖、编译所有包与 Web 前端，再注入本仓库的运行时补丁（`patch-dsh.cjs`）。基础镜像为 `node:24-trixie-slim`（Debian 13 + Node 24），默认监听 `0.0.0.0`，配合 Docker 端口映射开箱即用。镜像由 GitHub Actions 定时检查上游最新发布标签并自动构建推送到腾讯云 CCR。
 
 镜像：`sgccr.ccs.tencentyun.com/misaka-network/deepseek-harness`（`:latest` / `:<版本>`）　上游：<https://github.com/deepseek-ai/deepseek-harness>
 
@@ -40,6 +40,13 @@ docker run -d --name dsh \
   -v "$PWD/workspace:/workspace" \
   -v "$PWD/dsh-home:/root/.dsh" \
   sgccr.ccs.tencentyun.com/misaka-network/deepseek-harness:latest
+```
+
+自建镜像（从上游源码构建，`DSH_REF` 为发布标签 / 分支 / commit，默认最新 `dsh-v*` 标签）：
+
+```bash
+docker build -t deepseek-harness:local .
+docker build --build-arg DSH_REF=dsh-v0.1.0-rc.7 -t deepseek-harness:local .
 ```
 
 ### 需要配置的环境变量
