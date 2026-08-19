@@ -1,22 +1,64 @@
 'use strict'
-// Build-time patch for dsh's compiled packages.
+// Build-time patch for dsh's compiled packages, applied to a SOURCE checkout.
 //
-// dsh is consumed from npm as compiled JS, so we patch its build output rather
-// than its source. Each patch bakes in a `process.env.*` READ (not a literal
-// value), so the value is resolved at RUNTIME: changing the env var and
+// dsh is built from the deepseek-harness monorepo (pnpm workspace): each
+// package's compiled bundle lives in-package (packages/<tier>/<name>/lib).
+// This script locates each target package by name (no reliance on npm's
+// global-install layout, which pnpm's isolation does not reproduce), patches
+// its built bundle in place, and bakes in `process.env.*` READs (not literal
+// values) so the value is resolved at RUNTIME: changing the env var and
 // restarting the container works without rebuilding.
 
 const fs = require('node:fs')
 const path = require('node:path')
-const { createRequire } = require('node:module')
-const { execSync, spawnSync } = require('node:child_process')
+const { spawnSync } = require('node:child_process')
 
-// Resolve packages robustly: anchor resolution inside the installed
-// @deepseek-ai/dsh package so each package is found whether npm hoisted it to
-// the top-level node_modules or nested it under dsh/node_modules.
-const globalRoot = execSync('npm root -g', { encoding: 'utf8' }).trim()
-const dshDir = path.join(globalRoot, '@deepseek-ai', 'dsh')
-const req = createRequire(path.join(dshDir, 'package.json'))
+const root = path.resolve(process.argv[2] ?? process.env.DSH_SOURCE_DIR ?? '')
+if (!root || !fs.existsSync(path.join(root, 'package.json'))) {
+  console.error('patch-dsh: pass the built source checkout dir as argv[1] (or set DSH_SOURCE_DIR)')
+  process.exit(1)
+}
+
+// Workspace package dirs live under packages/<tier>/<name> (or apps/*, vendor/*).
+function findPackageDir(name) {
+  const candidates = []
+  for (const sub of ['packages', 'apps', 'vendor']) {
+    const base = path.join(root, sub)
+    if (!fs.existsSync(base)) continue
+    for (const tier of fs.readdirSync(base)) {
+      const tierDir = path.join(base, tier)
+      if (!fs.statSync(tierDir).isDirectory()) continue
+      let dirs = [tierDir]
+      if (sub === 'packages') {
+        dirs = fs.readdirSync(tierDir)
+          .filter((d) => fs.statSync(path.join(tierDir, d)).isDirectory())
+          .map((d) => path.join(tierDir, d))
+      }
+      for (const dir of dirs) {
+        const pj = path.join(dir, 'package.json')
+        if (!fs.existsSync(pj)) continue
+        try {
+          if (JSON.parse(fs.readFileSync(pj, 'utf8')).name === name) candidates.push(dir)
+        } catch {}
+      }
+    }
+  }
+  if (candidates.length !== 1) {
+    throw new Error(`patch-dsh: expected exactly one workspace dir for "${name}", found ${candidates.length}`)
+  }
+  return candidates[0]
+}
+
+// The compiled entry a patch rewrites: the package's `exports["."]` default or
+// `main`, resolved relative to the package dir (lib/index.js for these hosts).
+function entryFile(pkgDir, name) {
+  const pj = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'))
+  const def = pj.exports?.['.']?.default ?? pj?.exports?.['.']?.import ?? pj.main
+  if (typeof def !== 'string' || def.length === 0) {
+    throw new Error(`patch-dsh: cannot resolve the entry file of "${name}"`)
+  }
+  return path.resolve(pkgDir, def)
+}
 
 const targets = [
   {
@@ -139,13 +181,18 @@ const targets = [
 ]
 
 for (const { pkg, replacements } of targets) {
-  const entry = req.resolve(pkg)
+  const dir = findPackageDir(pkg)
+  const entry = entryFile(dir, pkg)
   let src = fs.readFileSync(entry, 'utf8')
   for (const [from, to] of replacements) {
     const count = src.split(from).length - 1
+    if (count === 0 && src.includes(to)) {
+      console.log(`patch-dsh: already applied in ${path.relative(root, entry)}: ${from.slice(0, 60)}...`)
+      continue
+    }
     if (count !== 1) {
       console.error(
-        `patch-dsh: expected exactly one occurrence (found ${count}) in ${entry}:\n  ${from}`,
+        `patch-dsh: expected exactly one occurrence (found ${count}) in ${path.relative(root, entry)}:\n  ${from}`,
       )
       process.exit(1)
     }
@@ -157,5 +204,5 @@ for (const { pkg, replacements } of targets) {
   const check = spawnSync(process.execPath, ['--check', entry], { stdio: 'inherit' })
   if (check.status !== 0) process.exit(check.status ?? 1)
 
-  console.log(`patch-dsh: patched ${entry}`)
+  console.log(`patch-dsh: patched ${path.relative(root, entry)}`)
 }
