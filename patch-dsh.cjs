@@ -32,6 +32,35 @@ const targets = [
         '`${identity.product}/${identity.version} (+${identity.url})`',
         'process.env.UA ?? `${identity.product}/${identity.version} (+${identity.url})`',
       ],
+      // Universal reasoning ladder: any model whose adapter declares NO
+      // reasoning capability still exposes the full thinking-level ladder
+      // (off/minimal/low/medium/high/xhigh/max), so the model picker's
+      // 推理等级 control is available for every model and every provider.
+      [
+        'const DEFAULT_RETRYABLE_CODES = Object.freeze([',
+        'const UNIVERSAL_REASONING_LEVELS = Object.freeze([\n' +
+          '\tObject.freeze({ id: "off", name: "Off" }),\n' +
+          '\tObject.freeze({ id: "minimal", name: "Minimal" }),\n' +
+          '\tObject.freeze({ id: "low", name: "Low" }),\n' +
+          '\tObject.freeze({ id: "medium", name: "Medium" }),\n' +
+          '\tObject.freeze({ id: "high", name: "High" }),\n' +
+          '\tObject.freeze({ id: "xhigh", name: "Extra High" }),\n' +
+          '\tObject.freeze({ id: "max", name: "Max" })\n' +
+          ']);\n' +
+          'const DEFAULT_RETRYABLE_CODES = Object.freeze([',
+      ],
+      // Fill the reasoning metadata for models without any (universal ladder,
+      // no forced default: the picker offers "Default" + the seven levels).
+      [
+        'const reasoning = resolved.reasoning;\n\t\tif (reasoning === void 0) return info;',
+        'const reasoning = resolved.reasoning;\n' +
+          '\tif (reasoning === void 0) return {\n' +
+          '\t\t...info,\n' +
+          '\t\treasoning: {\n' +
+          '\t\t\tefforts: UNIVERSAL_REASONING_LEVELS.map((effort) => ({ ...effort }))\n' +
+          '\t\t}\n' +
+          '\t};',
+      ],
     ],
   },
   {
@@ -54,6 +83,57 @@ const targets = [
       [
         'const home = homedir()',
         'const home = process.env.DSH_DEFAULT_DIRECTORY ?? process.cwd()',
+      ],
+    ],
+  },
+  {
+    pkg: '@deepseek-ai/dsh-llm-pi-ai',
+    replacements: [
+      // Friendlier display names for the reasoning ladder (xhigh -> Extra High).
+      [
+        'import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";',
+        'import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";\n' +
+          '/** Display names for the reasoning ladder. */\n' +
+          'const REASONING_LEVEL_NAMES = Object.freeze({\n' +
+          '\toff: "Off",\n' +
+          '\tminimal: "Minimal",\n' +
+          '\tlow: "Low",\n' +
+          '\tmedium: "Medium",\n' +
+          '\thigh: "High",\n' +
+          '\txhigh: "Extra High",\n' +
+          '\tmax: "Max"\n' +
+          '});',
+      ],
+      // Universal thinking for models pi-ai knows nothing about (hand-declared
+      // providers, models without a catalog reasoning flag): instead of marking
+      // them non-reasoning (`reasoning: false`, which hides the 推理等级 control
+      // and suppresses every reasoning wire knob), give them a universal
+      // thinkingLevelMap. Every level maps to its own wire spelling, so a chosen
+      // level is sent as-is (`reasoning_effort` etc.) and the provider decides.
+      // "off" stays absent from the map so the no-selection default keeps
+      // sending nothing (provider default), exactly as before.
+      [
+        'if (efforts === void 0) return { reasoning: base?.reasoning ?? false };',
+        'if (efforts === void 0) {\n' +
+          '\t\tif (base?.reasoning === false) return { reasoning: false };\n' +
+          '\t\tif (base?.reasoning === true) return { reasoning: true };\n' +
+          '\t\treturn {\n' +
+          '\t\t\treasoning: true,\n' +
+          '\t\t\tthinkingLevelMap: {\n' +
+          '\t\t\t\tminimal: "minimal",\n' +
+          '\t\t\t\tlow: "low",\n' +
+          '\t\t\t\tmedium: "medium",\n' +
+          '\t\t\t\thigh: "high",\n' +
+          '\t\t\t\txhigh: "xhigh",\n' +
+          '\t\t\t\tmax: "max"\n' +
+          '\t\t\t}\n' +
+          '\t\t};\n' +
+          '\t}',
+      ],
+      // Use the friendlier names in the picker metadata.
+      [
+        'name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`',
+        'name: REASONING_LEVEL_NAMES[level] ?? `${level.charAt(0).toUpperCase()}${level.slice(1)}`',
       ],
     ],
   },
