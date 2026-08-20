@@ -198,17 +198,40 @@ const targets = [
     // a string with content-hashed class names, so the media-query suffix is
     // built from the triggerLabel/triggerEffort classes found in that same
     // bundle -- hash-independent and safe across dsh builds.
-    pkg: '@deepseek-ai/dsh-client-ui-model-selection',
+    ...hideOnMobile('@deepseek-ai/dsh-client-ui-model-selection', ['triggerLabel', 'triggerEffort']),
+  },
+  {
+    // Mobile: hide the session-log download button in the session header.
+    ...hideOnMobile('@deepseek-ai/dsh-session-log-export', ['sessionLogButton']),
+  },
+]
+
+/**
+* CSS-module mobile-hiding patch for a client bundle: the compiled client.js
+* inlines the component's CSS module as a string with content-hashed class
+* names; this appends a @media (max-width:560px) rule hiding the given class
+* keys (resolved from the bundle's own css map, so hashes never break it).
+* @param pkg - the workspace package to patch (its lib/client.js).
+* @param classKeys - css-map keys whose elements hide on phones.
+*/
+function hideOnMobile(pkg, classKeys) {
+  return {
+    pkg,
     file: 'lib/client.js',
     custom(entry, src, log) {
       const cssMatch = src.match(/const css = ("[^"]*");/)
-      if (!cssMatch) throw new Error('patch-dsh: model-selection css const not found')
-      const mapMatch = src.match(/module_css_default = \{\n([\s\S]*?)\n\s*\};/)
-      const map = mapMatch?.[1] ?? ''
-      const label = map.match(/"triggerLabel": "([^"]+)"/)?.[1]
-      const effort = map.match(/"triggerEffort": "([^"]+)"/)?.[1]
-      if (!label || !effort) throw new Error('patch-dsh: model-selection triggerLabel/triggerEffort classes not found')
-      const suffix = `@media (max-width:560px){.${label},.${effort}{display:none}}`
+      if (!cssMatch) throw new Error(`patch-dsh: ${pkg} css const not found`)
+      const mapMatch = src.match(/module_css_default = \{([\s\S]*?)\};/)
+      const classes = (mapMatch?.[1] ?? '')
+        .match(new RegExp(`"(${classKeys.join('|')})": "([^"]+)"`, 'g')) ?? []
+      const entries = new Map(classes.map((m) => {
+        const hit = m.match(/"([^"]+)": "([^"]+)"/)
+        return [hit[1], hit[2]]
+      }))
+      if (classKeys.some((key) => !entries.has(key))) {
+        throw new Error(`patch-dsh: ${pkg} missing css classes ${classKeys.join(',')} in the css map`)
+      }
+      const suffix = `@media (max-width:560px){${classKeys.map((key) => `.${entries.get(key)}`).join(',')}{display:none}}`
       if (cssMatch[1].includes(suffix)) {
         log(`already applied in ${path.relative(root, entry)}`)
         return src
@@ -216,8 +239,8 @@ const targets = [
       const newCss = cssMatch[1].slice(0, -1) + suffix + '"'
       return src.replace(cssMatch[0], `const css = ${newCss};`)
     },
-  },
-]
+  }
+}
 
 for (const { pkg, replacements, custom, file } of targets) {
   const dir = findPackageDir(pkg)
