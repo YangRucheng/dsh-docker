@@ -191,25 +191,55 @@ const targets = [
       ],
     ],
   },
+  {
+    // Mobile: hide the model name + thinking level in the composer's model seat
+    // so the seat never overlaps the sibling read/write policy buttons in the
+    // tool row on phones. The compiled client bundle inlines the CSS module as
+    // a string with content-hashed class names, so the media-query suffix is
+    // built from the triggerLabel/triggerEffort classes found in that same
+    // bundle -- hash-independent and safe across dsh builds.
+    pkg: '@deepseek-ai/dsh-client-ui-model-selection',
+    file: 'lib/client.js',
+    custom(entry, src, log) {
+      const cssMatch = src.match(/const css = ("[^"]*");/)
+      if (!cssMatch) throw new Error('patch-dsh: model-selection css const not found')
+      const mapMatch = src.match(/module_css_default = \{\n([\s\S]*?)\n\s*\};/)
+      const map = mapMatch?.[1] ?? ''
+      const label = map.match(/"triggerLabel": "([^"]+)"/)?.[1]
+      const effort = map.match(/"triggerEffort": "([^"]+)"/)?.[1]
+      if (!label || !effort) throw new Error('patch-dsh: model-selection triggerLabel/triggerEffort classes not found')
+      const suffix = `@media (max-width:560px){.${label},.${effort}{display:none}}`
+      if (cssMatch[1].includes(suffix)) {
+        log(`already applied in ${path.relative(root, entry)}`)
+        return src
+      }
+      const newCss = cssMatch[1].slice(0, -1) + suffix + '"'
+      return src.replace(cssMatch[0], `const css = ${newCss};`)
+    },
+  },
 ]
 
-for (const { pkg, replacements } of targets) {
+for (const { pkg, replacements, custom, file } of targets) {
   const dir = findPackageDir(pkg)
-  const entry = entryFile(dir, pkg)
+  const entry = path.resolve(dir, file ?? entryFile(dir, pkg))
   let src = fs.readFileSync(entry, 'utf8')
-  for (const [from, to] of replacements) {
-    const count = src.split(from).length - 1
-    if (count === 0 && src.includes(to)) {
-      console.log(`patch-dsh: already applied in ${path.relative(root, entry)}: ${from.slice(0, 60)}...`)
-      continue
+  if (custom !== undefined) {
+    src = custom(entry, src, (msg) => console.log(`patch-dsh: ${msg}`))
+  } else {
+    for (const [from, to] of replacements) {
+      const count = src.split(from).length - 1
+      if (count === 0 && src.includes(to)) {
+        console.log(`patch-dsh: already applied in ${path.relative(root, entry)}: ${from.slice(0, 60)}...`)
+        continue
+      }
+      if (count !== 1) {
+        console.error(
+          `patch-dsh: expected exactly one occurrence (found ${count}) in ${path.relative(root, entry)}:\n  ${from}`,
+        )
+        process.exit(1)
+      }
+      src = src.replace(from, to)
     }
-    if (count !== 1) {
-      console.error(
-        `patch-dsh: expected exactly one occurrence (found ${count}) in ${path.relative(root, entry)}:\n  ${from}`,
-      )
-      process.exit(1)
-    }
-    src = src.replace(from, to)
   }
   fs.writeFileSync(entry, src)
 
