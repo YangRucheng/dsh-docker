@@ -64,9 +64,9 @@ const targets = [
   {
     pkg: '@deepseek-ai/dsh-llm',
     replacements: [
-      // Failure retry count (was a hardcoded 2).
+      // Failure retry count (upstream default 2 pre-rc.8, 5 since rc.8).
       [
-        'const DEFAULT_MAX_RETRIES = 2;',
+        'const DEFAULT_MAX_RETRIES = 5;',
         'const DEFAULT_MAX_RETRIES = Number(process.env.DSH_RETRY ?? 30);',
       ],
       // Provider request User-Agent (was always `deepseek-harness/<version> (+url)`).
