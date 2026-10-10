@@ -92,9 +92,12 @@ const targets = [
       // Browser-trust fence bypass (opt-in: DSH_DISABLE_TRUST_FENCE=1). Disables
       // the Host/Origin/cross-site checks so any client that can reach the port
       // may call the /api — use only behind your own auth.
+      // 0.2.1-alpha.2 给该函数加了 bindHost / protocol 两个参数（并据此判定 bind
+      // 地址），所以**不锚签名行**：改锚函数体里两条签名之后都唯一的第一条语句
+      // （取 Host 头），旁路插在它前面——此时函数已进入，一进来就短路，与签名无关。
       [
-        'function isTrustedApiRequest(request, trustedHosts) {',
-        'function isTrustedApiRequest(request, trustedHosts) {\n\tif (process.env.DSH_DISABLE_TRUST_FENCE === "1") return true;',
+        '\tconst host = header$1(request.headers, "host");',
+        '\tif (process.env.DSH_DISABLE_TRUST_FENCE === "1") return true;\n\tconst host = header$1(request.headers, "host");',
       ],
       // Browser-session (cookie/token) auth bypass — the second half of the same
       // opt-in. Since 0.1.3-alpha.1 the /api and the index page additionally
@@ -107,9 +110,13 @@ const targets = [
       // serving index.html), so under DSH_DISABLE_TRUST_FENCE=1 it always passes
       // and the whole GUI opens without any token/cookie — use only behind your
       // own auth.
+      // 0.2.1-alpha.2 起签名变成 isAuthenticated(request, secure = false)，且首行
+      // 取 authority 的函数由 requestAuthority 改名 requestAudience（多一个 secure
+      // 参数）。锚点不锚签名/首行，改用两条签名之后都唯一的 cookie 取值行，把旁路
+      // 插在它前面（此时 request/secure 都已到位，函数一进来就短路，与上游实现无关）。
       [
-        '\tisAuthenticated(request) {\n\t\tconst authority = requestAuthority(request.headers);',
-        '\tisAuthenticated(request) {\n\t\tif (process.env.DSH_DISABLE_TRUST_FENCE === "1") return true;\n\t\tconst authority = requestAuthority(request.headers);',
+        '\t\tconst rawCookie = header(request.headers, "cookie");',
+        '\t\tif (process.env.DSH_DISABLE_TRUST_FENCE === "1") return true;\n\t\tconst rawCookie = header(request.headers, "cookie");',
       ],
     ],
   },
