@@ -47,18 +47,30 @@
 - **只改构建产物**：补丁对象是 `apps/web/dist/favicon.svg` 与 `apps/web/dist/favicon-dark.svg`（gitignored，由 `dsh web` 作为静态资源伺服），上游被 git 跟踪的源文件 `apps/web/public/favicon*.svg` 不动；颜色常量写在 `scripts/red-favicon/patch-red-favicon.cjs` 里，不引入环境变量。改色值只需改该脚本的 `RED` 常量，并在 `docs/scripts.md` 与 `README.md` 同步。
 - **布局变化要可感知**：脚本先按产物识别布局（有 `favicon-dark.svg` 走新版、否则找内联 CSS 锚点），两种都对不上直接报错（构建失败）；收尾还要对**全部** favicon 产物做一次「红标就位 + 默认色零残留」复检，避免半打补丁或上游再改布局时静默留下白标。
 
-## 6. 提交流程（必循，每次改动都按此执行）
+## 6. 模型选择选项规范
+
+本仓库对**模型选择界面**（composer 模型位菜单与 `/model` 弹窗，两者共用 `dsh-client-ui-model-selection` 的会话级目录）的定制统一放在 `scripts/model-options/patch-model-options.cjs`：一个功能、三条规则，同 `mobile-ui` 一样按规则增删，不拆新脚本。
+
+- **不显示 DeepSeek 官方渠道**：host 侧 `deepseek-official`（API Key 路由，菜单分组名「DeepSeek」）的模型选项必须从模型列表里移除；账号登录路由 `deepseek-account` 与第三方提供方保持原样。过滤点必须是两个入口共用的那份目录（`ModelDirectory.syncInputs()` 写进 store 的 `groups`），**不得**只改 composer 或只改 `/model` 弹窗其中一处。
+- **不显示推理等级 Default**：`provider-default`（「不指定、用提供方默认」）那一行必须删掉，只保留模型公布的等级；模型公布的等级名称与顺序不变。
+- **默认推理等级取最后一个公布的等级**：既然没有 Default 这一档，模型位与等级菜单就不得停在「未指定」。默认值必须是 `reasoning.efforts` 的最后一项，并且要真正生效——包括模型位显示的等级、等级菜单勾选的行、以及从菜单选中模型时提交给 Host 的 `reasoningEffort`。实现放在 `session/modelCatalog` 响应落地前的 `reasoning.defaultEffort` 归一（一处改动三个出口共用），**无条件覆盖**公布过 `defaultEffort` 的模型；模型没公布等级时保持原样。
+- **范围**：设置页的提供方 / 模型配置列表（`dsh-client-ui-settings-models`）与 subagent 授权卡片（`dsh-client-ui-settings-subagent`）不是「模型选择」，不得顺手改；真要改时按新规则在本节登记。
+- **锚点与幂等**：注入串带 `/*dsh-docker:model-options:<name>*/` marker，重跑按 marker 判定已应用；`syncInputs` 的 `groups` 在新旧布局里出现次数不同，**两条都要覆盖**（0.1.7-rc.1 只有 ready 分支，0.1.7-rc.2 / 0.2.0 起 loading/error 分支还有一条），catalog 侧的 ok 校验行在五种布局里都是唯一的插入点；锚点缺失即报错终止构建。
+- **终态复检（marker 不算数）**：marker 只能证明**某一处**注入过；上游再加一条写 `groups` 的分支时，只按 marker 会把「ready 分支已打、loading 分支漏打」误判成整条规则已完成（官方渠道会在目录加载中/出错时闪回来）。写盘前必须对**最终产物**复检：任何写进 store 的 `groups` 都要带官方渠道 marker，`provider-default` 的插入条件与 Default 行不得残留；复检不过即报错终止构建、不写盘。**已应用状态同样要过复检**，半打补丁的旧产物重跑时才会响亮失败，而不是带病出镜像。
+
+## 7. 提交流程（必循，每次改动都按此执行）
 
 1. **按功能点拆分 commit**：一次改动先拆成若干逻辑独立、主题清晰的小 commit（如：脚本拆分 / Dockerfile / 工作流 / 文档各一个），每笔 commit 都能独立审查；**禁止**把所有改动揉成一个大 commit。
-2. **功能分支**：从 `main` 切出 `feat/<简述>`（如 `feat/scripts-layout`），在分支上逐个提交。**不要在 `main` 上直接提交改动**（纯 `**.md` 文档例外，见第 6 条）。
+2. **功能分支**：从 `main` 切出 `feat/<简述>`（如 `feat/scripts-layout`），在分支上逐个提交。**不要在 `main` 上直接提交改动**（纯 `**.md` 文档例外，见第 7 条）。
 3. **发起 PR**：推送分支后 `gh pr create --base main --head <分支>`；PR 标题用 `feat:` / `fix:` / `docs:` 前缀（本仓库 squash 合并后 PR 标题即成为 main 上的提交信息），描述列出改动清单。
 4. **合并并删除分支**：确认通过后用 `gh pr merge --squash --delete-branch`（本仓库**仅允许 squash 合并**，见仓库 Settings → Merge button；`--delete-branch` 会同时删除本地与远端分支）。合并后无需再手动删分支。
 5. **清理多余分支**：定期核对并删除已合并交付的陈旧分支——远端 `git push origin --delete <分支>`（先用 `gh pr list --state merged` 确认已交付），本地 `git fetch --prune`（或 `git remote prune origin`）清除陈旧跟踪引用。
 6. **文档例外**：纯 `**.md` 改动不会触发 CI 镜像构建（`.github/workflows/build.yml` 的 `paths-ignore` 忽略 `**.md`），可免 PR 直接提交到 `main`；其余改动一律走第 1–4 条。
 
-## 7. 常见任务速查
+## 8. 常见任务速查
 
 - **给 GUI 加一条手机端 CSS 定制**：确认断点 → 在 `scripts/mobile-ui/patch-mobile-ui.cjs` 的 `targets` 里加一条（隐藏类名用 `hideOnMobile`，结构性规则用 `cssRule` + 自己的 marker；需要运行时行为就注入 client bundle 里，参考角标拖动那段）→ 跑脚本 → 刷新 GUI 验证（含拖动/点击等交互）→ 幂等复检 → 更新 `docs/scripts.md` 的说明 + 本文件第 4 节（**不新建脚本**）。
+- **给模型选择加减选项**：改 `scripts/model-options/patch-model-options.cjs` 的 `replacements`（渠道过滤用 `withoutOfficial(...)`，注入串带 `/*dsh-docker:model-options:<name>*/` marker；`syncInputs` 的 `groups` 新旧布局条数不同，`all` 条目兼容零次；默认推理等级由 catalog 落地前的归一决定，锚点是 `session/modelCatalog` 的 ok 校验行）→ 跑脚本 → 刷新 GUI 验证**两个入口**（composer 模型位菜单 + `/model` 弹窗）与默认等级（模型位显示 / 菜单勾选行 / 选中后提交的值）→ 幂等复检 → 同步 `docs/scripts.md`、`README.md` 与本文件第 6 节。
 - **新增 / 改名 / 删除 hook 脚本**：保持单一职责与自包含（不引用其他脚本）；同步 `docs/scripts.md` 清单；构建时脚本还要改 `Dockerfile` 的顺序列表。
 - **换 favicon 颜色**：改 `scripts/red-favicon/patch-red-favicon.cjs` 的 `RED` 常量（浅色 `fill="#000"`、深色 `fill="#fff"` 或旧布局内联 CSS `fill: #fff;` 的锚点都要覆盖）→ 跑脚本 → 刷新 GUI 验证（浅色与深色两种配色方案都要看）→ 幂等复检 → 同步 `docs/scripts.md` 与 `README.md` + 本文件第 5 节。
 - **换语音识别模型镜像站**：改 `scripts/speech-model-mirror/patch-speech-model-mirror.cjs` 的 `MIRROR_ORIGIN` 常量（锚点是编译产物里 origin 的默认值，`lib/index.js` 与 `lib/worker.js` 各一处；0.1.7-rc.1 起上游是多源 `modelOrigins` 默认数组，补丁把镜像挪首位、官方站留回退，更早是单源 `modelOrigin`）→ 跑脚本 → 用产物里的默认值拼地址、比对该清单的字节数与 sha256 → 幂等复检 → 同步 `docs/scripts.md` 与 `README.md`。
