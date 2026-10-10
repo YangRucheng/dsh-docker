@@ -58,20 +58,32 @@
 - **锚点与幂等**：注入串带 `/*dsh-docker:model-options:<name>*/` marker，重跑按 marker 判定已应用；`syncInputs` 的 `groups` 在新旧布局里出现次数不同，**两条都要覆盖**（0.1.7-rc.1 只有 ready 分支，0.1.7-rc.2 / 0.2.0 起 loading/error 分支还有一条），catalog 侧的 ok 校验行在五种布局里都是唯一的插入点；锚点缺失即报错终止构建。
 - **终态复检（marker 不算数）**：marker 只能证明**某一处**注入过；上游再加一条写 `groups` 的分支时，只按 marker 会把「ready 分支已打、loading 分支漏打」误判成整条规则已完成（官方渠道会在目录加载中/出错时闪回来）。写盘前必须对**最终产物**复检：任何写进 store 的 `groups` 都要带官方渠道 marker，`provider-default` 的插入条件与 Default 行不得残留；复检不过即报错终止构建、不写盘。**已应用状态同样要过复检**，半打补丁的旧产物重跑时才会响亮失败，而不是带病出镜像。
 
-## 7. 提交流程（必循，每次改动都按此执行）
+## 7. 中文支持规范（locale 与字体）
+
+容器内的中文可用性由**镜像层**（`Dockerfile`）与**一个 GUI 补丁**（`scripts/terminal-font/`）共同保证，二者职责不同、都必须满足：
+
+- **必须有 UTF-8 locale，且默认生效**：基础镜像（`node:*-slim`）不带 UTF-8 locale 时 `LC_CTYPE=POSIX`，POSIX 工具按字节处理——`wc -m` / `awk length` 数出字节数、「中文」= 6 而不是 2，`ps` 显示 `????`，`cut -c` / `fold -w` 会把汉字劈开，bash 的 `${#var}` 与行编辑按字节算宽度。镜像必须用 `locales` + `localedef` 生成 `C.UTF-8`（并保留基础镜像的 `C.utf8`）并设 `ENV LANG=C.UTF-8`。**不得改用 `zh_CN.UTF-8` 作为默认**：它会连带切换 `LC_COLLATE`（排序变拼音序）与 `LC_MESSAGES`，改变既有工具行为；`C.UTF-8` 只打开多字节处理。**不得改上游源码来传 locale**：上游 `subprocess-local` 的 `scrubbedParentEnv()` 刻意保留 locale 变量，`LANG` 会自然到达 agent 终端与 GUI 终端；注意 `managerEnvironment()` / `quietSystemdEnvironment()` 显式钉了 `LC_ALL=C`（systemd 管理用），那是上游有意为之，`LC_ALL` 不设默认值才不会覆盖它。
+- **必须有 CJK 字体**：缺 CJK 字体时 fontconfig 对 `:lang=zh` 返回 DejaVu，汉字渲染成豆腐块，影响容器内自行渲染的内容（headless Chromium / browser-use 截图、文档预览）。镜像安装 `fontconfig` + `fonts-noto-cjk`。
+- **GUI 终端的中文必须正好占两格**：xterm 按 Unicode 宽度给全角字符分配 **2 格**，字体必须让「拉丁格宽 : 全角宽」= **1 : 2**，否则中文在 2 格里只画 1.66 格、与 ASCII 混排整行错位。做法是在 `scripts/terminal-font/patch-terminal-font.cjs` 里往终端字体栈插入等宽 CJK 族 **`Noto Sans Mono CJK SC`**（拉丁 0.5em / 全角 1.0em）；**只加等宽变体，不得加比例字体**（`Noto Sans CJK SC` 拉丁 0.878em，会把比例退回 1.66）。插入位置在拉丁等宽字体之后、泛型 `monospace` 之前，保留桌面端已有字体的优先级。框线 / 块字符（`│─█`）由 xterm 的 `customGlyphs` 自绘，不受字体栈影响，无需为它们做取舍。
+- **字体栈补丁要覆盖两种上游布局**：0.2.1-alpha.2 起字体栈是内建回退常量 `TERMINAL_FONT_STACK`，0.2.1-alpha.1 及更早直接写在 `new Terminal({...})` 的 `fontFamily` 里；两者是**同一个字符串字面量**，脚本按它定位。注入的族名一律用**单引号**（上游把栈放在双引号 JS 字符串里）。锚点缺失、命中次数不是 1、或出现「CJK 族已在而旧栈仍在」的半打补丁状态，都要报错终止构建。
+- **构建时断言不得省略**：locale 生成结果、`printf '\344\270\255\346\226\207' | LC_ALL=C.UTF-8 wc -m` 必须为 2、`fc-match monospace:lang=zh-cn` 必须命中 CJK 字体，任一不满足即构建失败——基础镜像或字体包变化时要响亮失败，而不是静默产出中文坏掉的镜像。
+- **`git config --system core.quotepath false`**：与 locale 无关，但同属「中文在终端里能不能读」——不设时 git 把中文文件名输出成八进制转义。
+
+## 8. 提交流程（必循，每次改动都按此执行）
 
 1. **按功能点拆分 commit**：一次改动先拆成若干逻辑独立、主题清晰的小 commit（如：脚本拆分 / Dockerfile / 工作流 / 文档各一个），每笔 commit 都能独立审查；**禁止**把所有改动揉成一个大 commit。
-2. **功能分支**：从 `main` 切出 `feat/<简述>`（如 `feat/scripts-layout`），在分支上逐个提交。**不要在 `main` 上直接提交改动**（纯 `**.md` 文档例外，见第 7 条）。
+2. **功能分支**：从 `main` 切出 `feat/<简述>`（如 `feat/scripts-layout`），在分支上逐个提交。**不要在 `main` 上直接提交改动**（纯 `**.md` 文档例外，见第 8 条第 6 点）。
 3. **发起 PR**：推送分支后 `gh pr create --base main --head <分支>`；PR 标题用 `feat:` / `fix:` / `docs:` 前缀（本仓库 squash 合并后 PR 标题即成为 main 上的提交信息），描述列出改动清单。
 4. **合并并删除分支**：确认通过后用 `gh pr merge --squash --delete-branch`（本仓库**仅允许 squash 合并**，见仓库 Settings → Merge button；`--delete-branch` 会同时删除本地与远端分支）。合并后无需再手动删分支。
 5. **清理多余分支**：定期核对并删除已合并交付的陈旧分支——远端 `git push origin --delete <分支>`（先用 `gh pr list --state merged` 确认已交付），本地 `git fetch --prune`（或 `git remote prune origin`）清除陈旧跟踪引用。
 6. **文档例外**：纯 `**.md` 改动不会触发 CI 镜像构建（`.github/workflows/build.yml` 的 `paths-ignore` 忽略 `**.md`），可免 PR 直接提交到 `main`；其余改动一律走第 1–4 条。
 
-## 8. 常见任务速查
+## 9. 常见任务速查
 
 - **给 GUI 加一条手机端 CSS 定制**：确认断点 → 在 `scripts/mobile-ui/patch-mobile-ui.cjs` 的 `targets` 里加一条（隐藏类名用 `hideOnMobile`，结构性规则用 `cssRule` + 自己的 marker；需要运行时行为就注入 client bundle 里，参考角标拖动那段）→ 跑脚本 → 刷新 GUI 验证（含拖动/点击等交互）→ 幂等复检 → 更新 `docs/scripts.md` 的说明 + 本文件第 4 节（**不新建脚本**）。
 - **给模型选择加减选项**：改 `scripts/model-options/patch-model-options.cjs` 的 `replacements`（渠道过滤用 `withoutOfficial(...)`，注入串带 `/*dsh-docker:model-options:<name>*/` marker；`syncInputs` 的 `groups` 新旧布局条数不同，`all` 条目兼容零次；默认推理等级由 catalog 落地前的归一决定，锚点是 `session/modelCatalog` 的 ok 校验行）→ 跑脚本 → 刷新 GUI 验证**两个入口**（composer 模型位菜单 + `/model` 弹窗）与默认等级（模型位显示 / 菜单勾选行 / 选中后提交的值）→ 幂等复检 → 同步 `docs/scripts.md`、`README.md` 与本文件第 6 节。
 - **新增 / 改名 / 删除 hook 脚本**：保持单一职责与自包含（不引用其他脚本）；同步 `docs/scripts.md` 清单；构建时脚本还要改 `Dockerfile` 的顺序列表。
 - **换 favicon 颜色**：改 `scripts/red-favicon/patch-red-favicon.cjs` 的 `RED` 常量（浅色 `fill="#000"`、深色 `fill="#fff"` 或旧布局内联 CSS `fill: #fff;` 的锚点都要覆盖）→ 跑脚本 → 刷新 GUI 验证（浅色与深色两种配色方案都要看）→ 幂等复检 → 同步 `docs/scripts.md` 与 `README.md` + 本文件第 5 节。
 - **换语音识别模型镜像站**：改 `scripts/speech-model-mirror/patch-speech-model-mirror.cjs` 的 `MIRROR_ORIGIN` 常量（锚点是编译产物里 origin 的默认值，`lib/index.js` 与 `lib/worker.js` 各一处；0.1.7-rc.1 起上游是多源 `modelOrigins` 默认数组，补丁把镜像挪首位、官方站留回退，更早是单源 `modelOrigin`）→ 跑脚本 → 用产物里的默认值拼地址、比对该清单的字节数与 sha256 → 幂等复检 → 同步 `docs/scripts.md` 与 `README.md`。
+- **调整中文支持（locale / 字体 / 终端字体栈）**：locale 与字体在 `Dockerfile` 的运行时阶段（`locales` + `localedef` 生成 `C.UTF-8`、`ENV LANG=C.UTF-8`、`fonts-noto-cjk`，末尾三条断言：locale 生成、`printf '\344\270\255\346\226\207' | LC_ALL=C.UTF-8 wc -m` = 2、`fc-match monospace:lang=zh-cn` 命中 CJK）→ 终端字体栈改 `scripts/terminal-font/patch-terminal-font.cjs` 的 `TO` 常量（**只加等宽 CJK 变体**，加比例字体比例会退回 1.66）→ 跑脚本 → 用 playwright 实测 `中` / `W` 的宽度比必须是 **2.000**（`HOME=/tmp/emptyhome` 排除手工装的 `/root/.fonts`，只验镜像层字体；注意 GUI 的 chunk 按 `lib/client.js` 的 rev 缓存，改完 chunk 要 `touch lib/client.js` 让 rev 变化才会重新伺服）→ 幂等复检 → 同步 `docs/scripts.md`、`README.md` 与本文件第 7 节。
 - **升级上游 dsh 版本**：定时轮询（`.github/workflows/build.yml`）发现上游新 `dsh-v*` 标签后，先由 `scripts/dsh-version/sync-version-file.sh` 把版本写进 `VERSION` 并提交推送，再构建镜像；手动触发用 `workflow_dispatch` 传版本（同样会先同步 `VERSION`）。若构建在补丁锚点处失败，按报错更新对应脚本后再构建。

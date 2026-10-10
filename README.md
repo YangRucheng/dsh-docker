@@ -95,6 +95,24 @@ docker build --build-arg DSH_REF=dsh-v0.1.0-rc.7 -t deepseek-harness:local .
 
 镜像通过 `scripts/red-favicon/patch-red-favicon.cjs` 把 favicon（浏览器标签页 / PWA 图标）换成红色版：鲸鱼标由上游的浅色模式黑色（`fill="#000"`）/ 深色模式白色统一改为固定红 `#E60012`，浅色与深色两种配色方案下都是红标。上游 0.1.7 起把深色配色拆成了独立文件：`/favicon.svg` 供浅色、`/favicon-dark.svg` 供深色，`index.html` 用两个带 `media` 的 `<link>` 引入；0.1.6 及更早则是单文件里 `<style>` 媒体查询的 `fill: #fff`。补丁两种布局都覆盖，且两种都对不上时报错终止构建（不会静默留下白标）。补丁只改 Web 构建产物 `apps/web/dist/favicon.svg` 与 `apps/web/dist/favicon-dark.svg`（dsh web 作为静态资源伺服），上游被 git 跟踪的源文件 `apps/web/public/favicon*.svg` 不受影响；颜色写死在脚本里，无需环境变量。
 
+### 中文支持（locale 与字体）
+
+`node:24-trixie-slim` 基础镜像既没有 UTF-8 locale 也没有中日韩字体，两者各自会让中文出问题；镜像构建时一并补齐：
+
+- **UTF-8 locale**（`locales` + `localedef` 生成 `C.UTF-8` / `en_US.UTF-8` / `zh_CN.UTF-8`，并设 `ENV LANG=C.UTF-8`）：没有 UTF-8 ctype 时，POSIX 工具把字节当字符——`ps` 显示 `????`、`wc -m` 与 `awk length` 数出字节数（「中文」= 6 而不是 2）、`cut -c` / `fold -w` 会把一个汉字劈成两半、bash 的 `${#var}` 与行编辑也按字节算宽度，于是在终端里编辑中文命令行会错位。`LANG` 会被 `dsh web` 进程继承，而上游的子进程层在清洗环境变量时**刻意保留 locale**（`scrubbedParentEnv` 只剔除凭据形状与 `DSH_*` 变量），因此 agent 终端（terminal-bash）与 GUI 终端（terminal-controller）都自动生效，**无需改上游源码**。选 `C.UTF-8` 而不是 `zh_CN.UTF-8`：只打开多字节处理，不改变 `LC_MESSAGES` / `LC_COLLATE`，工具输出语言与排序顺序保持原样（`zh_CN.UTF-8` 会把排序变成拼音序）。
+- **中日韩字体**（`fonts-noto-cjk` + `fontconfig`）：没有 CJK 字体时 fontconfig 对 `:lang=zh` 返回 DejaVu，而 DejaVu 没有汉字字形，容器内自己渲染的内容（headless Chromium / browser-use 截图、文档预览）会显示成豆腐块。
+- **`git config --system core.quotepath false`**：不设时 git 会把中文文件名输出成八进制转义（`"\344\270\255\346\226\207.txt"`），中文路径在终端里没法直接读；这一项与 locale 无关，是 git 自己的默认行为。
+
+构建时会对以上每一条做断言（locale 生成成功、`printf '\344\270\255\346\226\207' | wc -m` 必须是 2、`fc-match monospace:lang=zh-cn` 必须命中 CJK 字体），因此上游基础镜像或字体包变化会**响亮地让构建失败**，而不是静默推出一个中文坏掉的镜像。
+
+### GUI 终端的中文等宽对齐
+
+镜像通过 `scripts/terminal-font/patch-terminal-font.cjs` 给 GUI 终端（右栏 shell）的字体栈补上等宽 CJK 回退族。上游写死的字体栈是 `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`：前四个都是拉丁等宽字体，容器里一个都没有，实际落到泛型 `monospace` → DejaVu Sans Mono（拉丁步进 0.602em），而汉字回退到 Noto Sans CJK（全角步进 1.0em）；结果全角字符的步进只有格宽的 **1.661 倍**，而 xterm 按 Unicode 宽度给它分配 **2 格**——中文画在 2 格里只占 1.66 格，右侧留缝，与 ASCII 混排时整行错位。
+
+补丁往栈里插入 **`Noto Sans Mono CJK SC`**（`fonts-noto-cjk` 随包提供，拉丁 0.5em / 全角 1.0em），使「格宽 : 全角宽」正好是 **1 : 2**（实测 `W` = 6.5px、`中` = 13px，比值 2.000），与 xterm 的两格分配一致；插在拉丁等宽字体之后、泛型 `monospace` 之前，装了 SF Mono / Menlo / Consolas 的桌面端仍优先用它们画拉丁。**只加等宽 CJK 变体、不加比例字体**（`Noto Sans CJK SC` 拉丁步进 0.878em，会把比例重新退回 1.66）。
+
+补丁只改浏览器编译产物 `lib/client.terminal.js`（终端按需加载的 chunk，由 `dsh web` 直接伺服），上游被 git 跟踪的源码不动。两种上游布局的锚点是同一个字符串字面量，一条替换同时覆盖——0.2.1-alpha.2 起是终端字体改为可配置后的内建回退常量 `TERMINAL_FONT_STACK`，0.2.1-alpha.1 及更早直接写在 `new Terminal({...})` 的 `fontFamily` 里；锚点缺失或命中次数不是 1 直接报错终止构建，出现「CJK 族已在、旧栈还在」的半打补丁状态同样报错拒写。
+
 ### 手机端 UI 优化
 
 镜像通过 `scripts/mobile-ui/patch-mobile-ui.cjs`（一个脚本、五条规则）优化窄视口下的 GUI：
