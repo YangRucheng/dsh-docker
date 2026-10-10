@@ -65,6 +65,7 @@ RUN set -e; \
       /tmp/dsh-scripts/welcome-notice/patch-welcome-notice.cjs \
       /tmp/dsh-scripts/red-favicon/patch-red-favicon.cjs \
       /tmp/dsh-scripts/mobile-ui/patch-mobile-ui.cjs \
+      /tmp/dsh-scripts/terminal-font/patch-terminal-font.cjs \
       /tmp/dsh-scripts/model-options/patch-model-options.cjs \
       /tmp/dsh-scripts/speech-model-mirror/patch-speech-model-mirror.cjs \
     ; do echo "==> ${script}"; node "$script" /src; done; \
@@ -105,6 +106,44 @@ RUN apt-get update \
     && gh --version \
     && rm -rf /var/lib/apt/lists/*
 
+# Chinese support: a UTF-8 locale plus CJK fonts. Both are missing from the
+# `node:*-slim` base, and each breaks Chinese in its own way:
+#   * Without a UTF-8 locale (base image leaves LANG unset and LC_CTYPE=POSIX)
+#     every POSIX tool treats bytes as characters: `ps` prints `????`, `wc -m`
+#     and `awk length` count bytes (中文 = 6, not 2), `cut -c`/`fold -w` split a
+#     character in half, and bash's `${#var}` plus arrow-key line editing
+#     mis-measure CJK, so editing Chinese on the shell's command line breaks.
+#     LANG is inherited by the `dsh web` process and survives the harness's
+#     subprocess env scrub (`scrubbedParentEnv` deliberately keeps locale
+#     variables), so it reaches both the agent shell (terminal-bash) and the GUI
+#     terminal (terminal-controller) without touching upstream code.
+#   * Without CJK fonts, fontconfig answers `:lang=zh` with DejaVu, which has no
+#     CJK glyphs, so anything the container renders itself (headless Chromium /
+#     browser-use screenshots, document previews) comes out as tofu boxes.
+#     `fonts-noto-cjk` also ships *Noto Sans Mono CJK SC*, the only family whose
+#     Latin advance is exactly half its CJK advance -- that 1:2 ratio is what the
+#     GUI terminal needs to draw a double-width character inside exactly the two
+#     cells xterm allocates for it (see scripts/terminal-font).
+# Every claim above is asserted below, so an upstream base-image or font-package
+# change fails the build loudly instead of silently shipping a Chinese-broken
+# image. The 中文 probe is written as octal UTF-8 escapes to keep the assertion
+# independent of this file's own encoding.
+RUN set -e; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends locales fontconfig fonts-noto-cjk; \
+    rm -rf /var/lib/apt/lists/*; \
+    localedef -i en_US -f UTF-8 en_US.UTF-8; \
+    localedef -i zh_CN -f UTF-8 zh_CN.UTF-8; \
+    fc-cache -f > /dev/null; \
+    for loc in C.utf8 en_US.utf8 zh_CN.utf8; do \
+      locale -a | grep -qix "$loc" || { echo "error: locale $loc was not generated" >&2; exit 1; }; \
+    done; \
+    test "$(printf '\344\270\255\346\226\207' | LC_ALL=C.UTF-8 wc -m | tr -d '[:space:]')" = "2" \
+      || { echo "error: UTF-8 locale does not count characters (expected 2)" >&2; exit 1; }; \
+    fc-match -f '%{family}\n' 'monospace:lang=zh-cn' | grep -q 'CJK' \
+      || { echo "error: fontconfig resolves no CJK monospace font" >&2; exit 1; }; \
+    git config --system core.quotepath false
+
 # Claude Code CLI (npm global install, latest release) — preinstalled so it can
 # be used as a subagent tool. The npm package ships the same native binary as
 # the standalone installer but avoids claude.ai's region-gated install script;
@@ -134,7 +173,14 @@ COPY scripts/container-entrypoint/docker-entrypoint.sh /usr/local/bin/docker-ent
 COPY scripts/plugin-fence/patch-plugin-fence.cjs /usr/local/bin/patch-plugin-fence.cjs
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-ENV DSH_HOME=/root/.dsh \
+# LANG (not LC_ALL) so a UTF-8 ctype is the default while per-category overrides
+# stay possible. C.UTF-8 is chosen over zh_CN.UTF-8 on purpose: it turns on
+# multibyte handling without also switching LC_MESSAGES/LC_COLLATE, so English
+# tool output and sort order are unchanged. DSH's own subprocess layer
+# deliberately pins LC_ALL=C for its systemd-manager calls; that explicit choice
+# still wins, as intended.
+ENV LANG=C.UTF-8 \
+    DSH_HOME=/root/.dsh \
     NODE_ENV=production \
     DISABLE_AUTOUPDATER=1
 
