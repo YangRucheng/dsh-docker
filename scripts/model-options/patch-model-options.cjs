@@ -166,14 +166,23 @@ function applyLastEffortDefault(src, display) {
 // → 0.1.7-rc.2 已经加过一次），或产物停在上次半打补丁的中间态时，只按 marker 会静默漏过滤，
 // 官方渠道会在目录加载中/出错时重新出现——这正是本脚本要防的失效模式。因此把「所有写进 store
 // 的 groups 都必须带官方渠道 marker」写成硬性复检，任一条不满足即报错终止构建。
+//
+// 判定按「读 catalog.value 的 groups 赋值」的出现次数，而不是按行：编译产物的换行/压缩形态
+// 由上游构建决定（将来若被压成一行，按行匹配会把同一行的漏过滤项一起漏掉）。表达式里
+// `groups:` 与 `catalog.value` 之间可能夹着 marker 或 `(`，所以用
+// `/groups\s*:[^,;{}]*catalog\.value/g` 逐处计数，要求它等于官方渠道 marker 的出现次数。
+const STORE_GROUPS_RE = /groups\s*:[^,;{}]*catalog\.value/g
+
 function finalStateProblem(display, src) {
   const problems = []
-  const groupLines = src.split('\n').filter((line) => line.includes('groups:') && line.includes('catalog.value'))
-  if (groupLines.length === 0) problems.push('no `groups` assignment reads catalog.value (anchor layout changed?)')
-  for (const line of groupLines) {
-    if (!line.includes(MARKER.officialChannel)) {
-      problems.push('a `groups` assignment is not filtered: ' + line.trim().slice(0, 120))
-    }
+  const storeWrites = [...src.matchAll(STORE_GROUPS_RE)].length
+  const filtered = src.split(MARKER.officialChannel).length - 1
+  if (storeWrites === 0) {
+    problems.push('no store `groups:` assignment reads catalog.value (anchor layout changed?)')
+  } else if (filtered !== storeWrites) {
+    // 每个写进 store 的 groups 都必须紧跟一个官方渠道 marker（marker 也不得多于写入）。
+    problems.push(`expected every store "groups:" write to carry the official-channel marker `
+      + `(writes=${storeWrites}, markers=${filtered})`)
   }
   if (src.includes('...reasoning.defaultEffort === void 0 ? [{')) {
     problems.push('the provider-default (Default) effort row is still inserted')
