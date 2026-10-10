@@ -107,6 +107,18 @@ docker build --build-arg DSH_REF=dsh-v0.1.0-rc.7 -t deepseek-harness:local .
 
 第 3 条与第 4 条共同构成一条规范：折叠后不占页面宽度，且展开入口（角标）始终可见可点；第 5 条让这个入口可以拖开，免得它挡住会话内容。桌面端（≥1024px）行为与上游一致（56px rail）。所有隐藏类名与选择器都从**目标 css 串所属的** css map 解析（一个 bundle 里可能有多个 CSS module，按哈希无关的类名归属判定），无需改上游源码。
 
+### 模型选择选项裁剪
+
+镜像通过 `scripts/model-options/patch-model-options.cjs`（一个脚本、三条规则）裁剪模型选择界面里的选项：
+
+- **移除 DeepSeek 官方渠道的模型**：host 侧 `deepseek-official` 是 API Key 路由（模型选择菜单里的分组名是「DeepSeek」），与账号登录路由 `deepseek-account`、第三方提供方（NewAPI / pi-ai 等自定义 provider）各自列出一份模型目录。补丁把官方渠道分组从模型列表里过滤掉，composer 模型位菜单与 `/model` 弹窗都不再显示它；账号路由与第三方提供方不受影响。过滤点在两个入口共用的会话级目录（`ModelDirectory.syncInputs()` 写进 store 的 `groups`），所以打一处即同时覆盖两个入口。
+- **移除推理等级里的 Default**：适配器没有公布 `defaultEffort` 的模型，上游会在已公布等级前额外插入一行「Default」（代表「不指定、用提供方默认」）。补丁去掉这一行，只保留模型真正公布的等级——例如菜单原来是 Default / Off / High，现在只剩 Off / High。
+- **默认推理等级取最后一个公布的等级**：删掉 Default 之后，模型若没有公布 `defaultEffort`，上游会让它停在「未指定」——模型位显示 Default、等级菜单没有勾选行、从菜单选中模型也不带 `reasoningEffort`。补丁在 `session/modelCatalog` 响应通过校验、写进目录之前，把每个模型的 `reasoning.defaultEffort` 归一成它 `efforts` 的最后一项，于是模型位显示、等级菜单的勾选行、以及选中模型时提交给 Host 的推理等级都变成最后一个等级（例如 Off / High 会默认 High）。**公布过 `defaultEffort` 的模型同样以最后一个等级为准**（这是无条件覆盖，不是兜底）；模型没有公布等级（无 `reasoning` 或 `efforts` 为空）时保持原样。
+
+三条都只改 `dsh-client-ui-model-selection` 的浏览器产物 `lib/client.js`（构建时由 `pnpm build:lib` 产出，上游被 git 跟踪的 `src/client/*.tsx` 不动）。当前会话若正停在官方渠道的模型上，模型位会按上游既有的「已被移除的 provider/model ID」方式显示，直到用户重新选一个可用模型。设置页的提供方 / 模型配置列表与 subagent 授权卡片不属于「模型选择」，不在裁剪范围内。锚点缺失 / 命中次数不符会直接报错终止构建；已验证兼容 0.1.7-rc.1（`syncInputs` 只有 ready 分支写 `groups`）与 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2 / 0.2.1-alpha.1（loading/error 分支也写一份，两条都过滤；catalog 侧的默认等级归一五种布局都打得上）。
+
+写盘前还会跑一次**终态复检**：官方渠道的漏过滤属于「静默失效」——marker 只能证明某一条 `groups` 分支打过，上游若再加一条写 `groups` 的分支，只按 marker 会把「ready 分支已打、loading 分支漏打」误判成整条规则已完成，官方渠道会在目录加载中/出错时闪回来。因此复检要求**任何**写进 store 的 `groups` 都带官方渠道 marker、且 `provider-default` 的插入条件与 Default 行没有残留；缺一条就报错终止构建、不写盘。**已应用状态同样过复检**，所以半打补丁的旧产物重跑会响亮失败，而不是带着漏过滤的产物出镜像。
+
 ### 语音识别模型走国内镜像站
 
 镜像通过 `scripts/speech-model-mirror/patch-speech-model-mirror.cjs` 让本地语音识别（SenseVoice 转写）的模型**优先**从国内可直连的 `https://hf-mirror.com` 下载：转写模型（int8 / fp32）、`tokens.txt` 与 Silero VAD 三份 pinned 资源都先取镜像站，不需要代理。
