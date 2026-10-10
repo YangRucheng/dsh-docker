@@ -70,7 +70,34 @@ function entryFile(pkgDir, name) {
 //   from   默认必须在文件里恰好出现一次（all 为真时允许 0 次以上，全部替换）；
 //   marker 默认取 to，命中即视为本补丁已应用，直接跳过；
 //   锚点不匹配则以非零码退出（构建即失败），绝不静默跳过。
+//
+// 历史实现迁移：本脚本换过锚点（0.2.1-alpha.2 不再锚 isTrustedApiRequest /
+// isAuthenticated 的签名行）。旧修订打过的产物里，旁路留在**老位置**；若新锚点的 marker
+// 匹配不到老位置，就会再插一条，同一个函数里出现两条等价的 `return true`——语义等价但
+// 是脏产物。这里登记「旧修订会留下、新修订已不再产生」的组合，每轮开始时先恢复成上游形态，
+// 再按新锚点重打，使新旧产物都收敛到同一终态。
+//
+// 注意：只登记**新旧形态确实不同**的组合。isTrustedApiRequest 新旧锚点插出来的组合完全
+// 相同（guard 后紧跟取 Host 头那行），marker 天然命中、不会重复，登记反而会在已应用状态
+// 下把唯一的旁路删掉，导致每轮来回增删（非幂等），所以这里不能登记它。
+const LEGACY_LINES = [
+  // 老锚点：旁路插在 isAuthenticated 首行 requestAuthority(...) 之前（0.2.1-alpha.1 形态）。
+  [
+    '\t\tif (process.env.DSH_DISABLE_TRUST_FENCE === "1") return true;\n\t\tconst authority = requestAuthority(request.headers);',
+    '\t\tconst authority = requestAuthority(request.headers);',
+  ],
+]
+
+// 把旧修订留下的组合恢复成上游形态（幂等；产物里不存在时零改动）。
+function dropLegacyLines(src) {
+  for (const [legacy, upstream] of LEGACY_LINES) {
+    while (src.includes(legacy)) src = src.replace(legacy, upstream)
+  }
+  return src
+}
+
 function applyReplacements(display, src, replacements) {
+  src = dropLegacyLines(src)
   for (const [from, to, all, marker] of replacements) {
     if (src.includes(marker ?? to)) {
       log('already applied in ' + display)
